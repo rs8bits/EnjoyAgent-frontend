@@ -1,12 +1,12 @@
 <template>
-  <div class="grid h-full min-h-0 gap-5 p-5 lg:grid-cols-[280px_minmax(0,1fr)_340px] lg:p-6">
+  <div class="grid h-full min-h-0 overflow-hidden gap-5 p-5 lg:grid-cols-[280px_minmax(0,1fr)_340px] lg:p-6">
     <SectionCard
-      class="min-h-0 overflow-hidden"
+      class="flex h-full min-h-0 flex-col overflow-hidden"
       eyebrow="会话"
       title="聊天工作台"
       description="左侧管理 Agent 和会话，中间进行真实对话，右侧查看本轮运行时信息。"
     >
-      <div class="flex h-full min-h-0 flex-col">
+      <div class="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] gap-4">
         <div class="space-y-4">
         <UiSelect
           v-model="selectedAgentId"
@@ -34,23 +34,33 @@
         </div>
 
         <div v-else class="ea-scroll min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
-          <button
+          <div
             v-for="session in sessions"
             :key="session.id"
-            class="w-full rounded-[20px] border px-4 py-4 text-left transition"
+            class="rounded-[20px] border px-4 py-4 text-left transition"
             :class="session.id === selectedSessionId ? 'border-accent bg-accent-soft' : 'border-line bg-canvas hover:bg-white'"
-            @click="selectSession(session.id)"
           >
-            <div class="text-sm font-semibold text-ink">{{ session.title }}</div>
-            <div class="mt-1 text-sm text-muted">{{ session.agentName }}</div>
-            <div class="mt-3 text-xs text-muted">{{ formatDateTime(session.updatedAt) }}</div>
-          </button>
+            <div class="flex items-start justify-between gap-3">
+              <button class="min-w-0 flex-1 text-left" @click="selectSession(session.id)">
+                <div class="truncate text-sm font-semibold text-ink">{{ session.title }}</div>
+                <div class="mt-1 text-sm text-muted">{{ session.agentName }}</div>
+                <div class="mt-3 text-xs text-muted">{{ formatDateTime(session.updatedAt) }}</div>
+              </button>
+              <button
+                class="rounded-full border border-line bg-white px-3 py-1 text-xs font-medium text-muted transition hover:border-rose-200 hover:text-rose-500"
+                :disabled="deletingSessionId === session.id"
+                @click="removeSession(session.id, session.title)"
+              >
+                {{ deletingSessionId === session.id ? "删除中" : "删除" }}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </SectionCard>
 
-    <SectionCard class="min-h-0 overflow-hidden" eyebrow="对话" title="真实聊天工作台" description="阶段四已经接入会话、消息历史和 SSE 流式输出。">
-      <div v-if="!agents.length" class="flex min-h-[680px] flex-col items-center justify-center rounded-[24px] border border-dashed border-line bg-canvas px-8 text-center">
+    <SectionCard class="flex h-full min-h-0 flex-col overflow-hidden" eyebrow="对话" title="真实聊天工作台" description="阶段四已经接入会话、消息历史和 SSE 流式输出。">
+      <div v-if="!agents.length" class="flex h-full min-h-0 flex-col items-center justify-center rounded-[24px] border border-dashed border-line bg-canvas px-8 text-center">
         <div class="text-lg font-semibold text-ink">当前还没有可用 Agent</div>
         <div class="mt-2 max-w-md text-sm leading-6 text-muted">
           先去 Agent 管理页面创建一个绑定了聊天模型的 Agent，然后回来发起真实会话。
@@ -63,15 +73,15 @@
         </RouterLink>
       </div>
 
-      <div v-else-if="!selectedSessionId" class="flex min-h-[680px] flex-col items-center justify-center rounded-[24px] border border-dashed border-line bg-canvas px-8 text-center">
+      <div v-else-if="!selectedSessionId" class="flex h-full min-h-0 flex-col items-center justify-center rounded-[24px] border border-dashed border-line bg-canvas px-8 text-center">
         <div class="text-lg font-semibold text-ink">先创建一个新会话</div>
         <div class="mt-2 max-w-md text-sm leading-6 text-muted">
           选择左侧 Agent，然后点击“新建会话”。创建成功后，这里会进入真实的消息流界面。
         </div>
       </div>
 
-      <div v-else class="flex h-full min-h-0 flex-col">
-        <div class="mb-5 flex items-center justify-between gap-4 rounded-[20px] border border-line bg-canvas px-4 py-4">
+      <div v-else class="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] gap-5">
+        <div class="flex items-center justify-between gap-4 rounded-[20px] border border-line bg-canvas px-4 py-4">
           <div>
             <div class="text-base font-semibold text-ink">{{ activeSession?.title ?? "当前会话" }}</div>
             <div class="mt-1 text-sm text-muted">
@@ -88,7 +98,7 @@
           </div>
         </div>
 
-        <div class="ea-scroll min-h-0 flex-1 space-y-5 overflow-y-auto pr-1">
+        <div class="ea-scroll min-h-0 space-y-5 overflow-y-auto pr-1">
           <div v-if="messagesLoading" class="rounded-[18px] border border-line bg-canvas px-4 py-10 text-sm text-muted">
             正在加载消息历史...
           </div>
@@ -124,7 +134,7 @@
           </div>
         </div>
 
-        <form class="mt-6 rounded-[26px] border border-line bg-canvas p-4" @submit.prevent="submitMessage">
+        <form class="shrink-0 rounded-[26px] border border-line bg-canvas p-4" @submit.prevent="submitMessage">
           <div class="rounded-[22px] border border-white bg-white px-4 py-4 shadow-sm">
             <textarea
               v-model="composer"
@@ -216,7 +226,7 @@ import SectionCard from "@/app/components/SectionCard.vue";
 import UiButton from "@/app/components/ui/UiButton.vue";
 import UiSelect from "@/app/components/ui/UiSelect.vue";
 import { listAgents } from "@/app/services/agents";
-import { createChatSession, listChatMessages, listChatSessions, streamChatMessage } from "@/app/services/chat";
+import { createChatSession, deleteChatSession, listChatMessages, listChatSessions, streamChatMessage } from "@/app/services/chat";
 import { extractApiErrorMessage } from "@/app/services/http";
 import type { Agent } from "@/app/types/agent";
 import type {
@@ -240,6 +250,7 @@ const loading = ref(false);
 const sessionLoading = ref(false);
 const messagesLoading = ref(false);
 const sending = ref(false);
+const deletingSessionId = ref<number | null>(null);
 const composer = ref("");
 const submitError = ref("");
 const currentTurn = ref<ChatTurn | null>(null);
@@ -395,6 +406,36 @@ async function createSessionForSelectedAgent() {
     submitError.value = extractApiErrorMessage(error, "创建会话失败");
   } finally {
     creatingSession.value = false;
+  }
+}
+
+async function removeSession(sessionId: number, title: string) {
+  if (deletingSessionId.value || !window.confirm(`确定删除会话“${title}”吗？消息历史和本轮调试信息都会一起移除。`)) {
+    return;
+  }
+
+  deletingSessionId.value = sessionId;
+  submitError.value = "";
+  try {
+    await deleteChatSession(sessionId);
+    if (selectedSessionId.value === sessionId) {
+      selectedSessionId.value = null;
+      messages.value = [];
+      currentTurn.value = null;
+      retrievalDebug.value = null;
+      streamStarted.value = null;
+    }
+    await loadSessions();
+    if (!selectedSessionId.value && sessions.value.length) {
+      selectedSessionId.value = sessions.value[0].id;
+    }
+    if (selectedSessionId.value) {
+      await loadMessages();
+    }
+  } catch (error) {
+    submitError.value = extractApiErrorMessage(error, "删除会话失败");
+  } finally {
+    deletingSessionId.value = null;
   }
 }
 

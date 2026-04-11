@@ -53,6 +53,7 @@ select {
 }
 
 .ea-scroll {
+  scrollbar-gutter: stable both-edges;
   scrollbar-width: thin;
   scrollbar-color: rgba(47, 109, 246, 0.28) transparent;
 }

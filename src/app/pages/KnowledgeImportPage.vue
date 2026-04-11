@@ -186,7 +186,11 @@
                       <div>
                         <div class="text-lg font-semibold text-ink">拖拽文件到这里，或点击选择文件</div>
                         <div class="mt-1 text-sm text-muted">
-                          {{ selectedKnowledgeBaseId ? "文档会直接导入当前知识库，并同步生成可检索切片。" : "请先在上方创建或选择知识库，然后再上传文档。" }}
+                          {{
+                            selectedKnowledgeBaseId
+                              ? "当前版本支持 TXT、Markdown、PDF。文档会直接导入当前知识库，并同步生成可检索切片。"
+                              : "请先在上方创建或选择知识库，然后再上传文档。"
+                          }}
                         </div>
                       </div>
                     </div>
@@ -216,6 +220,7 @@
                 ref="fileInput"
                 type="file"
                 class="hidden"
+                accept=".txt,.md,.markdown,.pdf,text/plain,text/markdown,application/pdf"
                 multiple
                 @change="handleFileChange"
               >
@@ -407,7 +412,8 @@ const errors = reactive({
   embeddingModelConfigId: ""
 });
 
-const fileTypes = ["TXT", "Markdown", "PDF", "HTML", "DOCX", "XLSX", "CSV", "EPUB"];
+const fileTypes = ["TXT", "Markdown", "PDF"];
+const supportedFileExtensions = new Set(["txt", "md", "markdown", "pdf"]);
 
 const selectedKnowledgeBase = computed(() =>
   knowledgeBases.value.find((item) => item.id === selectedKnowledgeBaseId.value) ?? null
@@ -474,6 +480,13 @@ function documentStatusClass(status: string) {
     return "bg-rose-50 text-rose-600";
   }
   return "bg-slate-100 text-slate-500";
+}
+
+function isSupportedKnowledgeFile(file: File) {
+  const extension = file.name.includes(".")
+    ? file.name.substring(file.name.lastIndexOf(".") + 1).toLowerCase()
+    : "";
+  return supportedFileExtensions.has(extension);
 }
 
 function syncForm(knowledgeBase: KnowledgeBase | null) {
@@ -633,6 +646,12 @@ function openFilePicker() {
 async function uploadFiles(files: File[]) {
   if (!selectedKnowledgeBaseId.value || !files.length) {
     submitError.value = "请先创建或选择一个知识库。";
+    return;
+  }
+
+  const unsupportedFiles = files.filter((file) => !isSupportedKnowledgeFile(file));
+  if (unsupportedFiles.length) {
+    submitError.value = `当前版本只支持 TXT、Markdown、PDF。以下文件暂不支持：${unsupportedFiles.map((file) => file.name).join("、")}`;
     return;
   }
 
