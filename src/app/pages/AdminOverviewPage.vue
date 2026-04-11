@@ -5,12 +5,12 @@
         <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">管理后台</div>
         <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">平台运营概览</h1>
         <p class="mt-2 max-w-3xl text-sm leading-6 text-muted">
-          这里先做成轻量运营后台预览，不走传统沉重的 Admin 模板，而是保持和用户工作台一致的设计体系。
+          这一页已经接入真实后台接口，会用当前的官方模型、充值审核和市场审核数据来展示平台状态，而不是静态占位信息。
         </p>
       </div>
-      <button class="rounded-full border border-line bg-white px-4 py-2.5 text-sm font-semibold text-ink shadow-sm transition hover:border-accent hover:text-accent">
-        导出快照
-      </button>
+      <UiButton variant="secondary" :disabled="loading" @click="loadOverview">
+        {{ loading ? "刷新中..." : "刷新运营概览" }}
+      </UiButton>
     </div>
 
     <div class="grid gap-5 lg:grid-cols-4">
@@ -24,11 +24,11 @@
     </div>
 
     <div class="mt-5 grid gap-5 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.7fr)]">
-      <SectionCard eyebrow="队列" title="待处理审核">
-        <div class="space-y-3">
+      <SectionCard eyebrow="队列" title="当前待处理事项">
+        <div v-if="queueItems.length" class="space-y-3">
           <div
-            v-for="item in reviews"
-            :key="item.title"
+            v-for="item in queueItems"
+            :key="`${item.tag}-${item.title}`"
             class="rounded-[20px] border border-line bg-canvas px-4 py-4"
           >
             <div class="flex items-start justify-between gap-4">
@@ -39,6 +39,9 @@
               <span class="rounded-full bg-white px-3 py-1 text-xs font-medium text-accent">{{ item.tag }}</span>
             </div>
           </div>
+        </div>
+        <div v-else class="rounded-[20px] border border-dashed border-line bg-canvas px-4 py-10 text-center text-sm leading-6 text-muted">
+          当前没有待处理事项。充值审核和市场审核队列都比较空。
         </div>
       </SectionCard>
 
@@ -63,68 +66,144 @@
         </div>
       </SectionCard>
     </div>
+
+    <div v-if="pageError" class="mt-5 rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+      {{ pageError }}
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed, onMounted, ref } from "vue";
 import SectionCard from "@/app/components/SectionCard.vue";
+import UiButton from "@/app/components/ui/UiButton.vue";
+import {
+  listAdminMarketAssets,
+  listAdminOfficialModelConfigs,
+  listAdminOfficialModelCredentials,
+  listAdminRechargeOrders
+} from "@/app/services/admin";
+import { extractApiErrorMessage } from "@/app/services/http";
+import type { MarketAsset, OfficialModelConfig, OfficialModelCredential, RechargeOrder } from "@/app/types/admin";
 
-const stats = [
+const loading = ref(false);
+const pageError = ref("");
+const officialCredentials = ref<OfficialModelCredential[]>([]);
+const officialConfigs = ref<OfficialModelConfig[]>([]);
+const pendingRechargeOrders = ref<RechargeOrder[]>([]);
+const allRechargeOrders = ref<RechargeOrder[]>([]);
+const pendingMarketAssets = ref<MarketAsset[]>([]);
+const publishedMarketAssets = ref<MarketAsset[]>([]);
+
+const stats = computed(() => [
   {
-    label: "官方模型调用",
-    value: "12.4k",
-    description: "最近 7 天托管模型请求量"
+    label: "托管凭证",
+    value: String(officialCredentials.value.length),
+    description: "当前平台托管的官方模型凭证数量"
+  },
+  {
+    label: "启用官方模型",
+    value: String(officialConfigs.value.filter((item) => item.enabled).length),
+    description: "当前可供普通用户选择的官方模型配置"
   },
   {
     label: "待审充值单",
-    value: "18",
-    description: "待管理员审核的充值申请"
+    value: String(pendingRechargeOrders.value.length),
+    description: "等待管理员核验并入账的钱包充值单"
   },
   {
-    label: "市场安装量",
-    value: "1,284",
-    description: "累计安装次数"
-  },
-  {
-    label: "异步计费健康度",
-    value: "99.2%",
-    description: "最近 24 小时计费消费成功率"
+    label: "待审市场资产",
+    value: String(pendingMarketAssets.value.length),
+    description: "等待管理员审核上架的共享市场资产"
   }
-];
+]);
 
-const reviews = [
-  {
-    title: "Agent 安装包：全球研究助手",
-    subtitle: "包含打包知识库和 MCP 工具",
-    tag: "Agent"
-  },
-  {
-    title: "充值单 #R-20260410-18",
-    subtitle: "等待财务核验并入账钱包",
-    tag: "计费"
-  },
-  {
-    title: "MCP 资产：网页抓取入门版",
-    subtitle: "OAuth 要求需要人工复核",
-    tag: "MCP"
-  }
-];
+const queueItems = computed(() => {
+  const rechargeItems = pendingRechargeOrders.value.slice(0, 3).map((order) => ({
+    title: `充值单 #${order.id}`,
+    subtitle: `${order.userDisplayName || order.userEmail} · ${Number(order.amount).toFixed(2)} ${order.currency}`,
+    tag: "充值"
+  }));
 
-const signals = [
-  {
-    label: "RabbitMQ 消费负载",
-    value: "健康",
-    progress: "68%"
-  },
-  {
-    label: "检索索引新鲜度",
-    value: "延迟 4 分钟",
-    progress: "82%"
-  },
-  {
-    label: "市场安装成功率",
-    value: "96.8%",
-    progress: "97%"
+  const assetItems = pendingMarketAssets.value.slice(0, 3).map((asset) => ({
+    title: asset.name,
+    subtitle: `${asset.assetType} · ${asset.submitterDisplayName || "匿名提交者"}`,
+    tag: "市场"
+  }));
+
+  return [...rechargeItems, ...assetItems];
+});
+
+const signals = computed(() => {
+  const credentialEnabledRatio = officialCredentials.value.length
+    ? Math.round((officialCredentials.value.filter((item) => item.enabled).length / officialCredentials.value.length) * 100)
+    : 0;
+  const modelEnabledRatio = officialConfigs.value.length
+    ? Math.round((officialConfigs.value.filter((item) => item.enabled).length / officialConfigs.value.length) * 100)
+    : 0;
+  const rechargeApprovedRatio = allRechargeOrders.value.length
+    ? Math.round((allRechargeOrders.value.filter((item) => item.status === "APPROVED").length / allRechargeOrders.value.length) * 100)
+    : 0;
+  const publishedAssetCount = publishedMarketAssets.value.length;
+  const totalVisibleAssets = publishedAssetCount + pendingMarketAssets.value.length;
+  const marketPublishedRatio = totalVisibleAssets ? Math.round((publishedAssetCount / totalVisibleAssets) * 100) : 0;
+
+  return [
+    {
+      label: "托管凭证启用率",
+      value: `${credentialEnabledRatio}%`,
+      progress: `${credentialEnabledRatio}%`
+    },
+    {
+      label: "官方模型可用率",
+      value: `${modelEnabledRatio}%`,
+      progress: `${modelEnabledRatio}%`
+    },
+    {
+      label: "充值审核通过率",
+      value: `${rechargeApprovedRatio}%`,
+      progress: `${rechargeApprovedRatio}%`
+    },
+    {
+      label: "市场上架占比",
+      value: `${marketPublishedRatio}%`,
+      progress: `${marketPublishedRatio}%`
+    }
+  ];
+});
+
+async function loadOverview() {
+  loading.value = true;
+  pageError.value = "";
+  try {
+    const [
+      credentialList,
+      configList,
+      pendingRechargeList,
+      rechargeList,
+      pendingAssetList,
+      publishedAssetList
+    ] = await Promise.all([
+      listAdminOfficialModelCredentials(),
+      listAdminOfficialModelConfigs(),
+      listAdminRechargeOrders("PENDING"),
+      listAdminRechargeOrders(),
+      listAdminMarketAssets(undefined, "PENDING"),
+      listAdminMarketAssets(undefined, "APPROVED")
+    ]);
+
+    officialCredentials.value = credentialList;
+    officialConfigs.value = configList;
+    pendingRechargeOrders.value = pendingRechargeList;
+    allRechargeOrders.value = rechargeList;
+    pendingMarketAssets.value = pendingAssetList;
+    publishedMarketAssets.value = publishedAssetList;
+  } catch (error) {
+    pageError.value = extractApiErrorMessage(error, "加载管理后台概览失败");
+  } finally {
+    loading.value = false;
   }
-];
+}
+
+onMounted(loadOverview);
 </script>

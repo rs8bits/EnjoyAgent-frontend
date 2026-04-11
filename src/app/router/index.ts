@@ -4,15 +4,20 @@ import AppWorkspaceLayout from "@/app/layouts/AppWorkspaceLayout.vue";
 import pinia from "@/app/stores/pinia";
 import { useAuthStore } from "@/app/stores/auth";
 import AdminOverviewPage from "@/app/pages/AdminOverviewPage.vue";
+import AdminOfficialModelsPage from "@/app/pages/AdminOfficialModelsPage.vue";
+import AdminReviewCenterPage from "@/app/pages/AdminReviewCenterPage.vue";
 import AgentsPage from "@/app/pages/AgentsPage.vue";
 import ChatPreviewPage from "@/app/pages/ChatPreviewPage.vue";
 import CredentialsPage from "@/app/pages/CredentialsPage.vue";
 import KnowledgeImportPage from "@/app/pages/KnowledgeImportPage.vue";
 import LoginPage from "@/app/pages/LoginPage.vue";
+import McpWorkbenchPage from "@/app/pages/McpWorkbenchPage.vue";
 import ModelConfigsPage from "@/app/pages/ModelConfigsPage.vue";
+import MarketHubPage from "@/app/pages/MarketHubPage.vue";
 import NotFoundPage from "@/app/pages/NotFoundPage.vue";
 import OfficialModelsPage from "@/app/pages/OfficialModelsPage.vue";
 import RegisterPage from "@/app/pages/RegisterPage.vue";
+import WalletCenterPage from "@/app/pages/WalletCenterPage.vue";
 import WorkspaceHomePage from "@/app/pages/WorkspaceHomePage.vue";
 
 const router = createRouter({
@@ -62,6 +67,24 @@ const router = createRouter({
           meta: { requiresAuth: true, title: "知识库管理" }
         },
         {
+          path: "mcp",
+          name: "mcp-workbench",
+          component: McpWorkbenchPage,
+          meta: { requiresAuth: true, title: "MCP 工具" }
+        },
+        {
+          path: "wallet",
+          name: "wallet-center",
+          component: WalletCenterPage,
+          meta: { requiresAuth: true, title: "钱包中心" }
+        },
+        {
+          path: "market",
+          name: "market-hub",
+          component: MarketHubPage,
+          meta: { requiresAuth: true, title: "共享市场" }
+        },
+        {
           path: "knowledge/import",
           redirect: "/app/knowledge"
         },
@@ -100,6 +123,18 @@ const router = createRouter({
           name: "admin-overview",
           component: AdminOverviewPage,
           meta: { requiresAuth: true, requiresAdmin: true, title: "管理后台" }
+        },
+        {
+          path: "admin/official-models",
+          name: "admin-official-models",
+          component: AdminOfficialModelsPage,
+          meta: { requiresAuth: true, requiresAdmin: true, title: "官方模型管理" }
+        },
+        {
+          path: "admin/reviews",
+          name: "admin-reviews",
+          component: AdminReviewCenterPage,
+          meta: { requiresAuth: true, requiresAdmin: true, title: "审核中心" }
         }
       ]
     },

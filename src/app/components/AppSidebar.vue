@@ -34,7 +34,7 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
-import { Bot, Boxes, CreditCard, Database, KeyRound, LayoutDashboard, ShieldCheck, Sparkles, ToyBrick, Waypoints } from "lucide-vue-next";
+import { Bot, Boxes, CreditCard, Database, KeyRound, LayoutDashboard, ShieldCheck, Sparkles, ToyBrick, Wallet, Waypoints, Wrench } from "lucide-vue-next";
 import { useRoute } from "vue-router";
 import { useAuthStore } from "@/app/stores/auth";
 
@@ -48,7 +48,8 @@ const sections = computed(() => {
       items: [
         { label: "工作台首页", to: "/app/home", icon: Sparkles },
         { label: "Agent 管理", to: "/app/agents", icon: Bot },
-        { label: "知识库管理", to: "/app/knowledge", icon: Database }
+        { label: "知识库管理", to: "/app/knowledge", icon: Database },
+        { label: "MCP 工具", to: "/app/mcp", icon: Wrench }
       ]
     },
     {
@@ -60,10 +61,11 @@ const sections = computed(() => {
       ]
     },
     {
-      title: "体验预览",
+      title: "平台能力",
       items: [
         { label: "聊天工作台", to: "/app/chat/workspace", icon: CreditCard },
-        { label: "市场预览", to: "/app/home", icon: Boxes }
+        { label: "钱包中心", to: "/app/wallet", icon: Wallet },
+        { label: "共享市场", to: "/app/market", icon: Boxes }
       ]
     }
   ];
@@ -73,7 +75,8 @@ const sections = computed(() => {
       title: "管理后台",
       items: [
         { label: "运营概览", to: "/app/admin/overview", icon: LayoutDashboard },
-        { label: "审核中心", to: "/app/admin/overview", icon: ShieldCheck }
+        { label: "官方模型管理", to: "/app/admin/official-models", icon: Waypoints },
+        { label: "审核中心", to: "/app/admin/reviews", icon: ShieldCheck }
       ]
     });
   }

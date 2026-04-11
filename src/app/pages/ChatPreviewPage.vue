@@ -187,6 +187,41 @@
         </div>
       </SectionCard>
 
+      <SectionCard eyebrow="工具轨迹" title="最近工具调用">
+        <div v-if="toolLogsLoading" class="rounded-[18px] border border-line bg-canvas px-4 py-8 text-sm text-muted">
+          正在加载工具调用轨迹...
+        </div>
+        <div v-else-if="!toolCallLogs.length" class="rounded-[18px] border border-dashed border-line bg-canvas px-4 py-8 text-sm leading-6 text-muted">
+          当前这条会话还没有工具调用记录。等 Agent 真的调用 MCP 工具后，这里会展示工具名、状态和耗时。
+        </div>
+        <div v-else class="space-y-3">
+          <div
+            v-for="log in toolCallLogs"
+            :key="log.id"
+            class="rounded-[20px] border border-line bg-canvas px-4 py-4"
+          >
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <div class="truncate text-sm font-semibold text-ink">{{ log.toolName }}</div>
+                <div class="mt-1 text-xs text-muted">
+                  {{ formatDateTime(log.createdAt) }}
+                </div>
+              </div>
+              <span
+                class="rounded-full px-3 py-1 text-xs font-medium"
+                :class="log.status === 'SUCCESS' ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'"
+              >
+                {{ log.status === "SUCCESS" ? "成功" : "失败" }}
+              </span>
+            </div>
+            <div class="mt-3 text-xs leading-5 text-muted">
+              {{ log.latencyMs ? `${log.latencyMs} ms` : "无耗时" }}
+              <span v-if="log.errorMessage"> · {{ log.errorMessage }}</span>
+            </div>
+          </div>
+        </div>
+      </SectionCard>
+
       <SectionCard eyebrow="运行时" title="本轮调用信息">
         <div class="space-y-3 text-sm">
           <div class="flex items-center justify-between rounded-2xl border border-line bg-canvas px-4 py-3">
@@ -228,6 +263,7 @@ import UiSelect from "@/app/components/ui/UiSelect.vue";
 import { listAgents } from "@/app/services/agents";
 import { createChatSession, deleteChatSession, listChatMessages, listChatSessions, streamChatMessage } from "@/app/services/chat";
 import { extractApiErrorMessage } from "@/app/services/http";
+import { listMcpToolCallLogs } from "@/app/services/mcp";
 import type { Agent } from "@/app/types/agent";
 import type {
   ChatMessage,
@@ -236,6 +272,7 @@ import type {
   ChatTurn,
   KnowledgeRetrievalDebug
 } from "@/app/types/chat";
+import type { McpToolCallLog } from "@/app/types/mcp";
 
 const route = useRoute();
 const router = useRouter();
@@ -257,6 +294,8 @@ const currentTurn = ref<ChatTurn | null>(null);
 const retrievalDebug = ref<KnowledgeRetrievalDebug | null>(null);
 const streamStarted = ref<ChatStreamStarted | null>(null);
 const streamingAssistantId = ref<number | null>(null);
+const toolCallLogs = ref<McpToolCallLog[]>([]);
+const toolLogsLoading = ref(false);
 
 const activeAgent = computed(() =>
   agents.value.find((agent) => String(agent.id) === selectedAgentId.value) ?? null
@@ -388,6 +427,25 @@ async function loadMessages() {
   }
 }
 
+async function loadToolCallLogs() {
+  if (!selectedSessionId.value) {
+    toolCallLogs.value = [];
+    return;
+  }
+
+  toolLogsLoading.value = true;
+  try {
+    toolCallLogs.value = await listMcpToolCallLogs({
+      sessionId: selectedSessionId.value,
+      limit: 12
+    });
+  } catch (error) {
+    submitError.value = extractApiErrorMessage(error, "加载工具调用轨迹失败");
+  } finally {
+    toolLogsLoading.value = false;
+  }
+}
+
 async function createSessionForSelectedAgent() {
   if (!selectedAgentId.value) {
     submitError.value = "请先选择一个 Agent。";
@@ -424,6 +482,7 @@ async function removeSession(sessionId: number, title: string) {
       currentTurn.value = null;
       retrievalDebug.value = null;
       streamStarted.value = null;
+      toolCallLogs.value = [];
     }
     await loadSessions();
     if (!selectedSessionId.value && sessions.value.length) {
@@ -431,6 +490,7 @@ async function removeSession(sessionId: number, title: string) {
     }
     if (selectedSessionId.value) {
       await loadMessages();
+      await loadToolCallLogs();
     }
   } catch (error) {
     submitError.value = extractApiErrorMessage(error, "删除会话失败");
@@ -444,6 +504,7 @@ function selectSession(sessionId: number) {
   currentTurn.value = null;
   retrievalDebug.value = null;
   streamStarted.value = null;
+  toolCallLogs.value = [];
 }
 
 async function submitMessage() {
@@ -516,6 +577,7 @@ async function submitMessage() {
 
     composer.value = "";
     await loadSessions();
+    await loadToolCallLogs();
     await nextTick();
   } catch (error) {
     submitError.value = error instanceof Error ? error.message : extractApiErrorMessage(error, "发送消息失败");
@@ -539,8 +601,10 @@ watch(selectedAgentId, async (value) => {
   currentTurn.value = null;
   retrievalDebug.value = null;
   streamStarted.value = null;
+  toolCallLogs.value = [];
   await loadSessions();
   await loadMessages();
+  await loadToolCallLogs();
 });
 
 watch(selectedSessionId, async (value) => {
@@ -552,12 +616,14 @@ watch(selectedSessionId, async (value) => {
     }
   });
   await loadMessages();
+  await loadToolCallLogs();
 });
 
 onMounted(async () => {
   await loadAgentsAndSessions();
   if (selectedSessionId.value) {
     await loadMessages();
+    await loadToolCallLogs();
   }
 });
 </script>

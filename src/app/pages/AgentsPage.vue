@@ -2,10 +2,10 @@
   <div class="min-h-full p-5 lg:p-8">
     <div class="mb-6 flex flex-col gap-4 border-b border-line pb-6 lg:flex-row lg:items-end lg:justify-between">
       <div>
-        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">阶段 5 · Agent 管理</div>
+        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">阶段 6 · Agent 管理</div>
         <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">创建你的第一个 Agent</h1>
         <p class="mt-2 max-w-3xl text-sm leading-6 text-muted">
-          阶段五已经接通知识库绑定。现在你可以把聊天模型、上下文和知识库一起配置成真正可检索的 Agent。
+          现在知识库绑定和 MCP 模块都已经接通。你可以先把聊天模型和知识库配置好，再去 MCP 页面给 Agent 绑定工具。
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-3">
@@ -67,7 +67,7 @@
       <SectionCard
         eyebrow="编辑区"
         :title="selectedId ? '编辑 Agent' : '新建 Agent'"
-        description="阶段五先把知识库绑定接通。工具绑定会在后续阶段继续扩展。"
+        description="聊天模型和知识库在这里配置；工具绑定已经挪到独立的 MCP 页面统一管理。"
       >
         <form class="space-y-5" @submit.prevent="submit">
           <UiTextField
@@ -171,7 +171,7 @@
             <br>
             2. `Rerank = 关闭`
             <br>
-            3. `知识库已接入，MCP = 后续阶段接入`
+            3. `知识库已接入，MCP 工具绑定请前往“/app/mcp”页面配置`
           </div>
 
           <div v-if="submitError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
