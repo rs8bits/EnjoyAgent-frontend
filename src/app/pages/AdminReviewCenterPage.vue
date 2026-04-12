@@ -1,5 +1,5 @@
 <template>
-  <div class="flex h-full min-h-0 flex-col p-5 lg:p-6">
+  <div class="ea-scroll flex h-full min-h-0 flex-col overflow-y-auto p-5 lg:p-6">
     <div class="mb-5 flex flex-col gap-5 border-b border-line pb-5 lg:flex-row lg:items-end lg:justify-between">
       <div>
         <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">阶段 8 · 审核中心</div>

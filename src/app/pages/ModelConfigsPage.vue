@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-full p-5 lg:p-8">
+  <div class="ea-scroll h-full overflow-y-auto p-5 lg:p-8">
     <div class="mb-6 flex flex-col gap-4 border-b border-line pb-6 lg:flex-row lg:items-end lg:justify-between">
       <div>
         <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">阶段 3 · 模型配置</div>

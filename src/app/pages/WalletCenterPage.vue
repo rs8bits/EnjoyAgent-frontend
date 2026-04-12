@@ -1,5 +1,5 @@
 <template>
-  <div class="flex min-h-full flex-col gap-5 p-5 lg:p-8">
+  <div class="ea-scroll flex h-full min-h-0 flex-col gap-5 overflow-y-auto p-5 lg:p-8">
     <div class="flex flex-col gap-4 border-b border-line pb-6 lg:flex-row lg:items-end lg:justify-between">
       <div>
         <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">阶段 7 · 钱包中心</div>
@@ -284,16 +284,36 @@ async function loadWalletCenter() {
   loading.value = true;
   pageError.value = "";
   try {
-    const [walletData, transactionList, orderList] = await Promise.all([
+    const [walletResult, transactionResult, orderResult] = await Promise.allSettled([
       getCurrentWallet(),
       listWalletTransactions(),
       listRechargeOrders()
     ]);
-    wallet.value = walletData;
-    transactions.value = transactionList;
-    rechargeOrders.value = orderList;
-  } catch (error) {
-    pageError.value = extractApiErrorMessage(error, "加载钱包中心失败");
+
+    const errors: string[] = [];
+
+    if (walletResult.status === "fulfilled") {
+      wallet.value = walletResult.value;
+    } else {
+      wallet.value = null;
+      errors.push(extractApiErrorMessage(walletResult.reason, "加载钱包信息失败"));
+    }
+
+    if (transactionResult.status === "fulfilled") {
+      transactions.value = transactionResult.value;
+    } else {
+      transactions.value = [];
+      errors.push(extractApiErrorMessage(transactionResult.reason, "加载钱包流水失败"));
+    }
+
+    if (orderResult.status === "fulfilled") {
+      rechargeOrders.value = orderResult.value;
+    } else {
+      rechargeOrders.value = [];
+      errors.push(extractApiErrorMessage(orderResult.reason, "加载充值单失败"));
+    }
+
+    pageError.value = errors[0] ?? "";
   } finally {
     loading.value = false;
   }

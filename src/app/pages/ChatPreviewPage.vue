@@ -93,7 +93,7 @@
               {{ streamStateLabel }}
             </span>
             <span class="rounded-full bg-white px-3 py-1 text-xs font-medium text-muted">
-              {{ currentTurn?.credentialSource === "PLATFORM" ? "官方模型" : "用户模型" }}
+              {{ credentialSourceLabel(currentTurn?.credentialSource ?? streamStarted?.credentialSource) }}
             </span>
           </div>
         </div>

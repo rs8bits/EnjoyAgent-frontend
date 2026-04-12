@@ -7,7 +7,7 @@
         <div
           class="h-full min-h-0 rounded-shell border border-white/70 bg-panel shadow-shell backdrop-blur-xl"
         >
-          <div class="h-full min-h-0 overflow-hidden">
+          <div class="ea-scroll h-full min-h-0 overflow-x-hidden overflow-y-auto">
             <RouterView />
           </div>
         </div>
