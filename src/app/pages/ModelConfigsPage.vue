@@ -10,7 +10,7 @@
       </div>
       <div class="flex flex-wrap items-center gap-3">
         <div class="rounded-full border border-line bg-white px-4 py-2.5 text-sm text-muted shadow-sm">
-          共 {{ modelConfigs.length }} 个模型配置
+          共 {{ total }} 个模型配置
         </div>
         <UiButton variant="secondary" @click="startCreate">新建模型配置</UiButton>
       </div>
@@ -61,6 +61,14 @@
             </div>
           </button>
         </div>
+
+        <UiPagination
+          :page="page"
+          :size="pageSize"
+          :total="total"
+          :total-pages="totalPages"
+          @change="loadModelConfigs"
+        />
       </SectionCard>
 
       <SectionCard
@@ -158,6 +166,7 @@ import { computed, onMounted, reactive, ref } from "vue";
 import SectionCard from "@/app/components/SectionCard.vue";
 import UiButton from "@/app/components/ui/UiButton.vue";
 import UiCheckbox from "@/app/components/ui/UiCheckbox.vue";
+import UiPagination from "@/app/components/ui/UiPagination.vue";
 import UiSelect from "@/app/components/ui/UiSelect.vue";
 import UiTextField from "@/app/components/ui/UiTextField.vue";
 import { credentialProviderOptions, modelTypeOptions } from "@/app/constants/options";
@@ -169,6 +178,10 @@ import type { ModelConfig, ModelType } from "@/app/types/model";
 
 const credentials = ref<Credential[]>([]);
 const modelConfigs = ref<ModelConfig[]>([]);
+const page = ref(0);
+const pageSize = 20;
+const total = ref(0);
+const totalPages = ref(0);
 const loading = ref(false);
 const saving = ref(false);
 const deleting = ref(false);
@@ -267,12 +280,33 @@ function validate() {
   return !errors.name && !errors.modelName && !errors.credentialId;
 }
 
-async function loadAll() {
+async function loadModelConfigs(newPage?: number) {
+  if (newPage !== undefined) page.value = newPage;
   loading.value = true;
   try {
-    const [credentialList, modelConfigList] = await Promise.all([listCredentials(), listModelConfigs()]);
-    credentials.value = credentialList;
-    modelConfigs.value = modelConfigList;
+    const result = await listModelConfigs(page.value, pageSize);
+    modelConfigs.value = result.items;
+    total.value = result.total;
+    totalPages.value = result.totalPages;
+  } catch (error) {
+    submitError.value = extractApiErrorMessage(error, "加载模型配置失败");
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function loadAll() {
+  page.value = 0;
+  loading.value = true;
+  try {
+    const [credentialList, modelConfigResult] = await Promise.all([
+      listCredentials(0, 999),
+      listModelConfigs(0, pageSize)
+    ]);
+    credentials.value = credentialList.items;
+    modelConfigs.value = modelConfigResult.items;
+    total.value = modelConfigResult.total;
+    totalPages.value = modelConfigResult.totalPages;
   } catch (error) {
     submitError.value = extractApiErrorMessage(error, "加载模型配置失败");
   } finally {

@@ -17,7 +17,7 @@
           {{ tools.length }} 个工具
         </div>
         <div class="rounded-full bg-canvas px-3 py-1 text-sm text-muted">
-          {{ bindings.length }} 个 Agent 绑定
+          {{ bindingTotal }} 个 Agent 绑定
         </div>
       </div>
     </div>
@@ -82,6 +82,14 @@
             </div>
           </button>
         </div>
+
+        <UiPagination
+          :page="serverPage"
+          :size="serverPageSize"
+          :total="serverTotal"
+          :total-pages="serverTotalPages"
+          @change="loadServers"
+        />
       </SectionCard>
 
       <div class="grid min-h-0 gap-5 xl:grid-rows-[auto_minmax(0,1fr)]">
@@ -182,7 +190,7 @@
             <div class="flex min-h-0 flex-col">
               <div class="mb-4 flex flex-wrap items-center gap-3">
                 <div class="rounded-full border border-line bg-canvas px-4 py-2 text-sm text-muted">
-                  当前 {{ tools.length }} 个工具
+                  当前 {{ toolTotal }} 个工具
                 </div>
                 <UiButton :disabled="syncingTools" @click="syncSelectedServerTools">
                   {{ syncingTools ? "同步中..." : "从远端同步" }}
@@ -223,6 +231,14 @@
                   </div>
                 </div>
               </div>
+
+              <UiPagination
+                :page="toolPage"
+                :size="toolPageSize"
+                :total="toolTotal"
+                :total-pages="toolTotalPages"
+                @change="loadToolsForSelectedServer"
+              />
             </div>
 
             <div class="flex min-h-0 flex-col">
@@ -298,7 +314,7 @@
                 {{ savingBindings ? "保存中..." : "保存 Agent 工具绑定" }}
               </UiButton>
               <div class="rounded-full border border-line bg-canvas px-3 py-1 text-xs text-muted">
-                当前 Agent 已绑定 {{ bindings.length }} 个工具
+                当前 Agent 已绑定 {{ bindingTotal }} 个工具
               </div>
             </div>
 
@@ -313,6 +329,14 @@
                 <span class="text-muted">{{ binding.serverName }}</span>
               </div>
             </div>
+
+            <UiPagination
+              :page="bindingPage"
+              :size="bindingPageSize"
+              :total="bindingTotal"
+              :total-pages="bindingTotalPages"
+              @change="loadBindingsForSelectedAgent"
+            />
           </div>
         </SectionCard>
 
@@ -439,6 +463,7 @@ import { useRoute, useRouter } from "vue-router";
 import SectionCard from "@/app/components/SectionCard.vue";
 import UiButton from "@/app/components/ui/UiButton.vue";
 import UiCheckbox from "@/app/components/ui/UiCheckbox.vue";
+import UiPagination from "@/app/components/ui/UiPagination.vue";
 import UiSelect from "@/app/components/ui/UiSelect.vue";
 import UiTextField from "@/app/components/ui/UiTextField.vue";
 import UiTextarea from "@/app/components/ui/UiTextarea.vue";
@@ -477,7 +502,15 @@ const route = useRoute();
 const router = useRouter();
 
 const servers = ref<McpServer[]>([]);
+const serverPage = ref(0);
+const serverPageSize = 20;
+const serverTotal = ref(0);
+const serverTotalPages = ref(0);
 const tools = ref<McpTool[]>([]);
+const toolPage = ref(0);
+const toolPageSize = 20;
+const toolTotal = ref(0);
+const toolTotalPages = ref(0);
 const agents = ref<Agent[]>([]);
 const credentials = ref<Credential[]>([]);
 const bindings = ref<Array<{
@@ -486,6 +519,10 @@ const bindings = ref<Array<{
   toolName: string;
   serverName: string;
 }>>([]);
+const bindingPage = ref(0);
+const bindingPageSize = 20;
+const bindingTotal = ref(0);
+const bindingTotalPages = ref(0);
 const boundToolIds = ref<number[]>([]);
 const oauthConnection = ref<McpOAuthConnection | null>(null);
 const toolCallLogs = ref<McpToolCallLog[]>([]);
@@ -700,18 +737,36 @@ function parseToolsEditor() {
   });
 }
 
+async function loadServers(newPage?: number) {
+  if (newPage !== undefined) serverPage.value = newPage;
+  baseLoading.value = true;
+  serverError.value = "";
+  try {
+    const result = await listMcpServers(serverPage.value, serverPageSize);
+    servers.value = result.items;
+    serverTotal.value = result.total;
+    serverTotalPages.value = result.totalPages;
+  } catch (error) {
+    serverError.value = extractApiErrorMessage(error, "加载 MCP Server 失败");
+  } finally {
+    baseLoading.value = false;
+  }
+}
+
 async function loadBaseResources() {
   baseLoading.value = true;
   serverError.value = "";
   try {
-    const [serverList, credentialList, agentList] = await Promise.all([
-      listMcpServers(),
-      listCredentials(),
-      listAgents()
+    const [serverResult, credentialResult, agentResult] = await Promise.all([
+      listMcpServers(0, serverPageSize),
+      listCredentials(0, 999),
+      listAgents(0, 999)
     ]);
-    servers.value = serverList;
-    credentials.value = credentialList;
-    agents.value = agentList;
+    servers.value = serverResult.items;
+    serverTotal.value = serverResult.total;
+    serverTotalPages.value = serverResult.totalPages;
+    credentials.value = credentialResult.items;
+    agents.value = agentResult.items;
 
     const routeServerId = parseRouteId("serverId");
     const routeAgentId = parseRouteId("agentId");
@@ -736,35 +791,42 @@ async function loadBaseResources() {
   }
 }
 
-async function loadToolsForSelectedServer() {
+async function loadToolsForSelectedServer(newPage?: number) {
+  if (newPage !== undefined) toolPage.value = newPage;
   if (!selectedServerId.value) {
     tools.value = [];
     toolsEditorJson.value = "[]";
     return;
   }
   try {
-    tools.value = await listMcpTools(selectedServerId.value);
+    const result = await listMcpTools(selectedServerId.value, toolPage.value, toolPageSize);
+    tools.value = result.items;
+    toolTotal.value = result.total;
+    toolTotalPages.value = result.totalPages;
     serializeToolsToEditor(tools.value);
   } catch (error) {
     toolError.value = extractApiErrorMessage(error, "加载工具目录失败");
   }
 }
 
-async function loadBindingsForSelectedAgent() {
+async function loadBindingsForSelectedAgent(newPage?: number) {
+  if (newPage !== undefined) bindingPage.value = newPage;
   if (!selectedAgentId.value) {
     bindings.value = [];
     boundToolIds.value = [];
     return;
   }
   try {
-    const result = await listAgentToolBindings(Number(selectedAgentId.value));
-    bindings.value = result.map((item) => ({
+    const result = await listAgentToolBindings(Number(selectedAgentId.value), bindingPage.value, bindingPageSize);
+    bindings.value = result.items.map((item) => ({
       id: item.id,
       toolId: item.toolId,
       toolName: item.toolName,
       serverName: item.serverName
     }));
-    boundToolIds.value = result.map((item) => item.toolId);
+    bindingTotal.value = result.total;
+    bindingTotalPages.value = result.totalPages;
+    boundToolIds.value = result.items.map((item) => item.toolId);
   } catch (error) {
     bindingError.value = extractApiErrorMessage(error, "加载 Agent 工具绑定失败");
   }
@@ -1003,6 +1065,7 @@ watch(selectedServerId, async (value) => {
     }
   });
   syncServerForm(selectedServer.value);
+  toolPage.value = 0;
   await loadToolsForSelectedServer();
   await loadOAuthConnectionForSelectedServer();
 });
@@ -1015,6 +1078,7 @@ watch(selectedAgentId, async (value) => {
       agentId: value || undefined
     }
   });
+  bindingPage.value = 0;
   await loadBindingsForSelectedAgent();
   await loadToolCallLogsForSelectedAgent();
 });

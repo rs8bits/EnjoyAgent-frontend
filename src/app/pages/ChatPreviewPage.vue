@@ -55,6 +55,14 @@
               </button>
             </div>
           </div>
+
+          <UiPagination
+            :page="sessionPage"
+            :size="sessionPageSize"
+            :total="sessionTotal"
+            :total-pages="sessionTotalPages"
+            @change="loadSessions"
+          />
         </div>
       </div>
     </SectionCard>
@@ -132,6 +140,14 @@
               </div>
             </div>
           </div>
+
+          <UiPagination
+            :page="messagePage"
+            :size="messagePageSize"
+            :total="messageTotal"
+            :total-pages="messageTotalPages"
+            @change="loadMessages"
+          />
         </div>
 
         <form class="shrink-0 rounded-[26px] border border-line bg-canvas p-4" @submit.prevent="submitMessage">
@@ -259,6 +275,7 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import SectionCard from "@/app/components/SectionCard.vue";
 import UiButton from "@/app/components/ui/UiButton.vue";
+import UiPagination from "@/app/components/ui/UiPagination.vue";
 import UiSelect from "@/app/components/ui/UiSelect.vue";
 import { listAgents } from "@/app/services/agents";
 import { createChatSession, deleteChatSession, listChatMessages, listChatSessions, streamChatMessage } from "@/app/services/chat";
@@ -279,7 +296,15 @@ const router = useRouter();
 
 const agents = ref<Agent[]>([]);
 const sessions = ref<ChatSession[]>([]);
+const sessionPage = ref(0);
+const sessionPageSize = 20;
+const sessionTotal = ref(0);
+const sessionTotalPages = ref(0);
 const messages = ref<ChatMessage[]>([]);
+const messagePage = ref(0);
+const messagePageSize = 20;
+const messageTotal = ref(0);
+const messageTotalPages = ref(0);
 const selectedAgentId = ref("");
 const selectedSessionId = ref<number | null>(null);
 const creatingSession = ref(false);
@@ -373,7 +398,8 @@ async function loadAgentsAndSessions() {
   loading.value = true;
   submitError.value = "";
   try {
-    agents.value = await listAgents();
+    const agentResult = await listAgents(0, 999);
+    agents.value = agentResult.items;
 
     const queryAgentId = typeof route.query.agentId === "string" ? route.query.agentId : "";
     const querySessionId = typeof route.query.sessionId === "string" ? Number(route.query.sessionId) : null;
@@ -398,11 +424,15 @@ async function loadAgentsAndSessions() {
   }
 }
 
-async function loadSessions() {
+async function loadSessions(newPage?: number) {
+  if (newPage !== undefined) sessionPage.value = newPage;
   sessionLoading.value = true;
   try {
     const agentId = selectedAgentId.value ? Number(selectedAgentId.value) : undefined;
-    sessions.value = await listChatSessions(agentId);
+    const result = await listChatSessions(agentId, sessionPage.value, sessionPageSize);
+    sessions.value = result.items;
+    sessionTotal.value = result.total;
+    sessionTotalPages.value = result.totalPages;
     if (selectedSessionId.value && !sessions.value.some((session) => session.id === selectedSessionId.value)) {
       selectedSessionId.value = sessions.value[0]?.id ?? null;
     }
@@ -411,7 +441,8 @@ async function loadSessions() {
   }
 }
 
-async function loadMessages() {
+async function loadMessages(newPage?: number) {
+  if (newPage !== undefined) messagePage.value = newPage;
   if (!selectedSessionId.value) {
     messages.value = [];
     return;
@@ -419,7 +450,10 @@ async function loadMessages() {
 
   messagesLoading.value = true;
   try {
-    messages.value = await listChatMessages(selectedSessionId.value);
+    const result = await listChatMessages(selectedSessionId.value, messagePage.value, messagePageSize);
+    messages.value = result.items;
+    messageTotal.value = result.total;
+    messageTotalPages.value = result.totalPages;
   } catch (error) {
     submitError.value = extractApiErrorMessage(error, "加载消息历史失败");
   } finally {
@@ -458,6 +492,7 @@ async function createSessionForSelectedAgent() {
     const session = await createChatSession({
       agentId: Number(selectedAgentId.value)
     });
+    sessionPage.value = 0;
     await loadSessions();
     selectedSessionId.value = session.id;
   } catch (error) {
@@ -484,6 +519,7 @@ async function removeSession(sessionId: number, title: string) {
       streamStarted.value = null;
       toolCallLogs.value = [];
     }
+    sessionPage.value = 0;
     await loadSessions();
     if (!selectedSessionId.value && sessions.value.length) {
       selectedSessionId.value = sessions.value[0].id;
@@ -576,6 +612,7 @@ async function submitMessage() {
     );
 
     composer.value = "";
+    sessionPage.value = 0;
     await loadSessions();
     await loadToolCallLogs();
     await nextTick();
@@ -602,6 +639,8 @@ watch(selectedAgentId, async (value) => {
   retrievalDebug.value = null;
   streamStarted.value = null;
   toolCallLogs.value = [];
+  sessionPage.value = 0;
+  messagePage.value = 0;
   await loadSessions();
   await loadMessages();
   await loadToolCallLogs();
@@ -615,6 +654,7 @@ watch(selectedSessionId, async (value) => {
       sessionId: value ? String(value) : undefined
     }
   });
+  messagePage.value = 0;
   await loadMessages();
   await loadToolCallLogs();
 });

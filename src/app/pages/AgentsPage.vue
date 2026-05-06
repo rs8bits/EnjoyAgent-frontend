@@ -10,7 +10,7 @@
       </div>
       <div class="flex flex-wrap items-center gap-3">
         <div class="rounded-full border border-line bg-white px-4 py-2.5 text-sm text-muted shadow-sm">
-          共 {{ agents.length }} 个 Agent
+          共 {{ total }} 个 Agent
         </div>
         <UiButton variant="secondary" @click="startCreate">新建 Agent</UiButton>
       </div>
@@ -62,6 +62,14 @@
             </div>
           </button>
         </div>
+
+        <UiPagination
+          :page="page"
+          :size="pageSize"
+          :total="total"
+          :total-pages="totalPages"
+          @change="loadAgents"
+        />
       </SectionCard>
 
       <SectionCard
@@ -207,6 +215,7 @@ import { useRoute } from "vue-router";
 import SectionCard from "@/app/components/SectionCard.vue";
 import UiButton from "@/app/components/ui/UiButton.vue";
 import UiCheckbox from "@/app/components/ui/UiCheckbox.vue";
+import UiPagination from "@/app/components/ui/UiPagination.vue";
 import UiSelect from "@/app/components/ui/UiSelect.vue";
 import UiTextarea from "@/app/components/ui/UiTextarea.vue";
 import UiTextField from "@/app/components/ui/UiTextField.vue";
@@ -221,6 +230,10 @@ import type { ModelConfig, OfficialModelConfig } from "@/app/types/model";
 const route = useRoute();
 
 const agents = ref<Agent[]>([]);
+const page = ref(0);
+const pageSize = 20;
+const total = ref(0);
+const totalPages = ref(0);
 const modelConfigs = ref<ModelConfig[]>([]);
 const officialModels = ref<OfficialModelConfig[]>([]);
 const knowledgeBases = ref<KnowledgeBase[]>([]);
@@ -373,19 +386,37 @@ function validate() {
   return !errors.name && !errors.systemPrompt && !errors.modelBinding && !errors.contextWindowSize && !errors.memoryUpdateMessageThreshold;
 }
 
-async function loadAll() {
+async function loadAgents(newPage?: number) {
+  if (newPage !== undefined) page.value = newPage;
   loading.value = true;
   try {
-    const [agentList, modelConfigList, officialModelList, knowledgeBaseList] = await Promise.all([
-      listAgents(),
-      listModelConfigs(),
-      listOfficialModelConfigs(),
-      listKnowledgeBases()
+    const result = await listAgents(page.value, pageSize);
+    agents.value = result.items;
+    total.value = result.total;
+    totalPages.value = result.totalPages;
+  } catch (error) {
+    submitError.value = extractApiErrorMessage(error, "加载 Agent 失败");
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function loadAll() {
+  page.value = 0;
+  loading.value = true;
+  try {
+    const [agentResult, modelConfigList, officialModelList, knowledgeBaseList] = await Promise.all([
+      listAgents(0, pageSize),
+      listModelConfigs(0, 999),
+      listOfficialModelConfigs(0, 999),
+      listKnowledgeBases(0, 999)
     ]);
-    agents.value = agentList;
-    modelConfigs.value = modelConfigList;
-    officialModels.value = officialModelList;
-    knowledgeBases.value = knowledgeBaseList;
+    agents.value = agentResult.items;
+    total.value = agentResult.total;
+    totalPages.value = agentResult.totalPages;
+    modelConfigs.value = modelConfigList.items;
+    officialModels.value = officialModelList.items;
+    knowledgeBases.value = knowledgeBaseList.items;
   } catch (error) {
     submitError.value = extractApiErrorMessage(error, "加载 Agent 失败");
   } finally {

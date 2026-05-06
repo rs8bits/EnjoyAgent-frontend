@@ -1,5 +1,5 @@
 import { http } from "@/app/services/http";
-import type { ApiResponse } from "@/app/types/api";
+import type { ApiResponse, PagedResponse } from "@/app/types/api";
 import type {
   CreateKnowledgeBasePayload,
   KnowledgeBase,
@@ -7,9 +7,9 @@ import type {
   UpdateKnowledgeBasePayload
 } from "@/app/types/knowledge";
 
-export async function listKnowledgeBases() {
-  const response = await http.get<ApiResponse<KnowledgeBase[]>>("/api/knowledge-bases");
-  return response.data.data;
+export async function listKnowledgeBases(page = 0, size = 20) {
+  const response = await http.get<PagedResponse<KnowledgeBase>>("/api/knowledge-bases", { params: { page, size } });
+  return response.data;
 }
 
 export async function getKnowledgeBase(id: number) {
@@ -31,9 +31,9 @@ export async function deleteKnowledgeBase(id: number) {
   await http.delete<ApiResponse<null>>(`/api/knowledge-bases/${id}`);
 }
 
-export async function listKnowledgeDocuments(knowledgeBaseId: number) {
-  const response = await http.get<ApiResponse<KnowledgeDocument[]>>(`/api/knowledge-bases/${knowledgeBaseId}/documents`);
-  return response.data.data;
+export async function listKnowledgeDocuments(knowledgeBaseId: number, page = 0, size = 20) {
+  const response = await http.get<PagedResponse<KnowledgeDocument>>(`/api/knowledge-bases/${knowledgeBaseId}/documents`, { params: { page, size } });
+  return response.data;
 }
 
 export async function uploadKnowledgeDocument(knowledgeBaseId: number, file: File) {

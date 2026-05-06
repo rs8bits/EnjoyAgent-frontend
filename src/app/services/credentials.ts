@@ -1,14 +1,14 @@
 import { http } from "@/app/services/http";
-import type { ApiResponse } from "@/app/types/api";
+import type { ApiResponse, PagedResponse } from "@/app/types/api";
 import type {
   CreateCredentialPayload,
   Credential,
   UpdateCredentialPayload
 } from "@/app/types/credential";
 
-export async function listCredentials() {
-  const response = await http.get<ApiResponse<Credential[]>>("/api/credentials");
-  return response.data.data;
+export async function listCredentials(page = 0, size = 20) {
+  const response = await http.get<PagedResponse<Credential>>("/api/credentials", { params: { page, size } });
+  return response.data;
 }
 
 export async function createCredential(payload: CreateCredentialPayload) {

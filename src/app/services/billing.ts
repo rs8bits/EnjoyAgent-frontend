@@ -1,5 +1,5 @@
 import { http } from "@/app/services/http";
-import type { ApiResponse } from "@/app/types/api";
+import type { ApiResponse, PagedResponse } from "@/app/types/api";
 import type {
   CreateRechargeOrderPayload,
   RechargeOrder,
@@ -12,9 +12,9 @@ export async function getCurrentWallet() {
   return response.data.data;
 }
 
-export async function listWalletTransactions() {
-  const response = await http.get<ApiResponse<UserWalletTransaction[]>>("/api/wallet/transactions");
-  return response.data.data;
+export async function listWalletTransactions(page = 0, size = 20) {
+  const response = await http.get<PagedResponse<UserWalletTransaction>>("/api/wallet/transactions", { params: { page, size } });
+  return response.data;
 }
 
 export async function createRechargeOrder(payload: CreateRechargeOrderPayload) {
@@ -22,9 +22,9 @@ export async function createRechargeOrder(payload: CreateRechargeOrderPayload) {
   return response.data.data;
 }
 
-export async function listRechargeOrders() {
-  const response = await http.get<ApiResponse<RechargeOrder[]>>("/api/recharge-orders");
-  return response.data.data;
+export async function listRechargeOrders(page = 0, size = 20) {
+  const response = await http.get<PagedResponse<RechargeOrder>>("/api/recharge-orders", { params: { page, size } });
+  return response.data;
 }
 
 export async function getRechargeOrder(id: number) {

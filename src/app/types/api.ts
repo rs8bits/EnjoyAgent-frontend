@@ -5,6 +5,14 @@ export interface ApiResponse<T> {
   timestamp: string;
 }
 
+export interface PagedResponse<T> {
+  items: T[];
+  page: number;
+  size: number;
+  total: number;
+  totalPages: number;
+}
+
 export interface ApiErrorPayload {
   code: string;
   message: string;

@@ -65,18 +65,31 @@
         </div>
       </SectionCard>
     </div>
+
+    <UiPagination
+      :page="page"
+      :size="pageSize"
+      :total="total"
+      :total-pages="totalPages"
+      @change="loadOfficialModels"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import SectionCard from "@/app/components/SectionCard.vue";
+import UiPagination from "@/app/components/ui/UiPagination.vue";
 import { credentialProviderOptions, modelTypeOptions } from "@/app/constants/options";
 import { extractApiErrorMessage } from "@/app/services/http";
 import { listOfficialModelConfigs } from "@/app/services/models";
 import type { OfficialModelConfig } from "@/app/types/model";
 
 const officialModels = ref<OfficialModelConfig[]>([]);
+const page = ref(0);
+const pageSize = 20;
+const total = ref(0);
+const totalPages = ref(0);
 const loading = ref(false);
 const submitError = ref("");
 const activeFilter = ref("ALL");
@@ -110,10 +123,29 @@ function priceText(price: string | number | null, currency: string | null) {
   return `${price} ${currency ?? ""} / 百万 Token`.trim();
 }
 
-async function loadAll() {
+async function loadOfficialModels(newPage?: number) {
+  if (newPage !== undefined) page.value = newPage;
   loading.value = true;
   try {
-    officialModels.value = await listOfficialModelConfigs();
+    const result = await listOfficialModelConfigs(page.value, pageSize);
+    officialModels.value = result.items;
+    total.value = result.total;
+    totalPages.value = result.totalPages;
+  } catch (error) {
+    submitError.value = extractApiErrorMessage(error, "加载官方模型失败");
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function loadAll() {
+  page.value = 0;
+  loading.value = true;
+  try {
+    const result = await listOfficialModelConfigs(0, pageSize);
+    officialModels.value = result.items;
+    total.value = result.total;
+    totalPages.value = result.totalPages;
   } catch (error) {
     submitError.value = extractApiErrorMessage(error, "加载官方模型失败");
   } finally {

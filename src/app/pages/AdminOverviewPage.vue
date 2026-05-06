@@ -184,20 +184,20 @@ async function loadOverview() {
       pendingAssetList,
       publishedAssetList
     ] = await Promise.all([
-      listAdminOfficialModelCredentials(),
-      listAdminOfficialModelConfigs(),
-      listAdminRechargeOrders("PENDING"),
-      listAdminRechargeOrders(),
-      listAdminMarketAssets(undefined, "PENDING"),
-      listAdminMarketAssets(undefined, "APPROVED")
+      listAdminOfficialModelCredentials(0, 200),
+      listAdminOfficialModelConfigs(0, 200),
+      listAdminRechargeOrders("PENDING", 0, 200),
+      listAdminRechargeOrders(undefined, 0, 200),
+      listAdminMarketAssets(undefined, "PENDING", 0, 200),
+      listAdminMarketAssets(undefined, "APPROVED", 0, 200)
     ]);
 
-    officialCredentials.value = credentialList;
-    officialConfigs.value = configList;
-    pendingRechargeOrders.value = pendingRechargeList;
-    allRechargeOrders.value = rechargeList;
-    pendingMarketAssets.value = pendingAssetList;
-    publishedMarketAssets.value = publishedAssetList;
+    officialCredentials.value = credentialList.items;
+    officialConfigs.value = configList.items;
+    pendingRechargeOrders.value = pendingRechargeList.items;
+    allRechargeOrders.value = rechargeList.items;
+    pendingMarketAssets.value = pendingAssetList.items;
+    publishedMarketAssets.value = publishedAssetList.items;
   } catch (error) {
     pageError.value = extractApiErrorMessage(error, "加载管理后台概览失败");
   } finally {

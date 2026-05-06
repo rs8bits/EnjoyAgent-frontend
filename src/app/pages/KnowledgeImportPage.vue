@@ -39,7 +39,7 @@
         <div class="flex h-full min-h-0 flex-col">
           <div class="mb-4 flex flex-wrap items-center gap-3">
             <div class="rounded-full border border-line bg-canvas px-4 py-2 text-sm text-muted">
-              共 {{ knowledgeBases.length }} 个知识库
+              共 {{ kbTotal }} 个知识库
             </div>
             <UiButton variant="secondary" @click="startCreate">新建知识库</UiButton>
           </div>
@@ -85,6 +85,14 @@
               </div>
             </button>
           </div>
+
+          <UiPagination
+            :page="kbPage"
+            :size="kbPageSize"
+            :total="kbTotal"
+            :total-pages="kbTotalPages"
+            @change="loadKnowledgeBasesList"
+          />
         </div>
       </SectionCard>
 
@@ -228,7 +236,7 @@
               <div class="mt-5 mb-3 flex items-center justify-between gap-3">
                 <div class="text-sm font-semibold text-ink">文档列表</div>
                 <div class="rounded-full border border-line bg-canvas px-3 py-1 text-xs text-muted">
-                  {{ documents.length }} 份文档
+                  {{ docTotal }} 份文档
                 </div>
               </div>
 
@@ -301,6 +309,14 @@
                   </div>
                 </div>
               </div>
+
+              <UiPagination
+                :page="docPage"
+                :size="docPageSize"
+                :total="docTotal"
+                :total-pages="docTotalPages"
+                @change="loadDocuments"
+              />
             </div>
           </SectionCard>
 
@@ -333,7 +349,7 @@
                 </div>
                 <div class="flex items-center justify-between rounded-2xl border border-line bg-canvas px-4 py-3">
                   <span class="text-muted">文档数量</span>
-                  <span class="font-semibold text-ink">{{ documents.length }}</span>
+                  <span class="font-semibold text-ink">{{ docTotal }}</span>
                 </div>
                 <div class="flex items-center justify-between rounded-2xl border border-line bg-canvas px-4 py-3">
                   <span class="text-muted">状态</span>
@@ -358,6 +374,7 @@ import { FileUp } from "lucide-vue-next";
 import SectionCard from "@/app/components/SectionCard.vue";
 import UiButton from "@/app/components/ui/UiButton.vue";
 import UiCheckbox from "@/app/components/ui/UiCheckbox.vue";
+import UiPagination from "@/app/components/ui/UiPagination.vue";
 import UiSelect from "@/app/components/ui/UiSelect.vue";
 import UiTextarea from "@/app/components/ui/UiTextarea.vue";
 import UiTextField from "@/app/components/ui/UiTextField.vue";
@@ -386,7 +403,15 @@ const steps = computed(() => [
 ]);
 
 const knowledgeBases = ref<KnowledgeBase[]>([]);
+const kbPage = ref(0);
+const kbPageSize = 20;
+const kbTotal = ref(0);
+const kbTotalPages = ref(0);
 const documents = ref<KnowledgeDocument[]>([]);
+const docPage = ref(0);
+const docPageSize = 20;
+const docTotal = ref(0);
+const docTotalPages = ref(0);
 const modelConfigs = ref<ModelConfig[]>([]);
 const selectedKnowledgeBaseId = ref<number | null>(null);
 const loading = ref(false);
@@ -534,22 +559,39 @@ function validateKnowledgeBaseForm() {
   return !errors.name && !errors.embeddingModelConfigId;
 }
 
+async function loadKnowledgeBasesList(newPage?: number) {
+  if (newPage !== undefined) kbPage.value = newPage;
+  loading.value = true;
+  try {
+    const result = await listKnowledgeBases(kbPage.value, kbPageSize);
+    knowledgeBases.value = result.items;
+    kbTotal.value = result.total;
+    kbTotalPages.value = result.totalPages;
+  } catch (error) {
+    submitError.value = extractApiErrorMessage(error, "加载知识库失败");
+  } finally {
+    loading.value = false;
+  }
+}
+
 async function loadKnowledgeBaseResources() {
   loading.value = true;
   try {
-    const [knowledgeBaseList, modelConfigList] = await Promise.all([
-      listKnowledgeBases(),
-      listModelConfigs()
+    const [knowledgeBaseResult, modelConfigList] = await Promise.all([
+      listKnowledgeBases(0, kbPageSize),
+      listModelConfigs(0, 999)
     ]);
-    knowledgeBases.value = knowledgeBaseList;
-    modelConfigs.value = modelConfigList;
+    knowledgeBases.value = knowledgeBaseResult.items;
+    kbTotal.value = knowledgeBaseResult.total;
+    kbTotalPages.value = knowledgeBaseResult.totalPages;
+    modelConfigs.value = modelConfigList.items;
 
     const queryKnowledgeBaseId = parseRouteKnowledgeBaseId();
-    const activeKnowledgeBaseId = selectedKnowledgeBaseId.value && knowledgeBaseList.some((item) => item.id === selectedKnowledgeBaseId.value)
+    const activeKnowledgeBaseId = selectedKnowledgeBaseId.value && knowledgeBases.value.some((item) => item.id === selectedKnowledgeBaseId.value)
       ? selectedKnowledgeBaseId.value
-      : queryKnowledgeBaseId && knowledgeBaseList.some((item) => item.id === queryKnowledgeBaseId)
+      : queryKnowledgeBaseId && knowledgeBases.value.some((item) => item.id === queryKnowledgeBaseId)
         ? queryKnowledgeBaseId
-        : knowledgeBaseList[0]?.id ?? null;
+        : knowledgeBases.value[0]?.id ?? null;
 
     if (activeKnowledgeBaseId !== selectedKnowledgeBaseId.value) {
       selectedKnowledgeBaseId.value = activeKnowledgeBaseId;
@@ -568,7 +610,8 @@ async function loadKnowledgeBaseResources() {
   }
 }
 
-async function loadDocuments() {
+async function loadDocuments(newPage?: number) {
+  if (newPage !== undefined) docPage.value = newPage;
   if (!selectedKnowledgeBaseId.value) {
     documents.value = [];
     return;
@@ -576,7 +619,10 @@ async function loadDocuments() {
 
   documentsLoading.value = true;
   try {
-    documents.value = await listKnowledgeDocuments(selectedKnowledgeBaseId.value);
+    const result = await listKnowledgeDocuments(selectedKnowledgeBaseId.value, docPage.value, docPageSize);
+    documents.value = result.items;
+    docTotal.value = result.total;
+    docTotalPages.value = result.totalPages;
   } catch (error) {
     submitError.value = extractApiErrorMessage(error, "加载文档列表失败");
   } finally {
@@ -737,6 +783,7 @@ watch(selectedKnowledgeBaseId, async (value) => {
     }
   });
   syncForm(selectedKnowledgeBase.value);
+  docPage.value = 0;
   await loadDocuments();
 });
 

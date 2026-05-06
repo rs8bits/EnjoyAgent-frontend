@@ -36,7 +36,7 @@
             </div>
             <div class="rounded-[22px] border border-line bg-canvas px-5 py-5">
               <div class="text-xs font-semibold uppercase tracking-[0.18em] text-muted">充值单</div>
-              <div class="mt-3 text-2xl font-semibold text-ink">{{ rechargeOrders.length }}</div>
+              <div class="mt-3 text-2xl font-semibold text-ink">{{ rechargeTotal }}</div>
               <div class="mt-2 text-sm text-muted">其中待审核 {{ pendingOrderCount }} 笔</div>
             </div>
           </div>
@@ -92,6 +92,14 @@
               </div>
             </div>
           </div>
+
+          <UiPagination
+            :page="txPage"
+            :size="txPageSize"
+            :total="txTotal"
+            :total-pages="txTotalPages"
+            @change="loadTransactions"
+          />
         </SectionCard>
       </div>
 
@@ -154,6 +162,14 @@
               </div>
             </div>
           </div>
+
+          <UiPagination
+            :page="rechargePage"
+            :size="rechargePageSize"
+            :total="rechargeTotal"
+            :total-pages="rechargeTotalPages"
+            @change="loadRechargeOrders"
+          />
         </SectionCard>
       </div>
     </div>
@@ -164,6 +180,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 import SectionCard from "@/app/components/SectionCard.vue";
 import UiButton from "@/app/components/ui/UiButton.vue";
+import UiPagination from "@/app/components/ui/UiPagination.vue";
 import UiTextField from "@/app/components/ui/UiTextField.vue";
 import UiTextarea from "@/app/components/ui/UiTextarea.vue";
 import { createRechargeOrder, listRechargeOrders, listWalletTransactions, getCurrentWallet } from "@/app/services/billing";
@@ -172,7 +189,15 @@ import type { RechargeOrder, UserWallet, UserWalletTransaction } from "@/app/typ
 
 const wallet = ref<UserWallet | null>(null);
 const transactions = ref<UserWalletTransaction[]>([]);
+const txPage = ref(0);
+const txPageSize = 20;
+const txTotal = ref(0);
+const txTotalPages = ref(0);
 const rechargeOrders = ref<RechargeOrder[]>([]);
+const rechargePage = ref(0);
+const rechargePageSize = 20;
+const rechargeTotal = ref(0);
+const rechargeTotalPages = ref(0);
 const loading = ref(false);
 const submittingRecharge = ref(false);
 const pageError = ref("");
@@ -280,14 +305,38 @@ function validateRechargeForm() {
   return !rechargeErrors.amount;
 }
 
+async function loadTransactions(newPage?: number) {
+  if (newPage !== undefined) txPage.value = newPage;
+  try {
+    const result = await listWalletTransactions(txPage.value, txPageSize);
+    transactions.value = result.items;
+    txTotal.value = result.total;
+    txTotalPages.value = result.totalPages;
+  } catch (error) {
+    pageError.value = extractApiErrorMessage(error, "加载钱包流水失败");
+  }
+}
+
+async function loadRechargeOrders(newPage?: number) {
+  if (newPage !== undefined) rechargePage.value = newPage;
+  try {
+    const result = await listRechargeOrders(rechargePage.value, rechargePageSize);
+    rechargeOrders.value = result.items;
+    rechargeTotal.value = result.total;
+    rechargeTotalPages.value = result.totalPages;
+  } catch (error) {
+    pageError.value = extractApiErrorMessage(error, "加载充值单失败");
+  }
+}
+
 async function loadWalletCenter() {
   loading.value = true;
   pageError.value = "";
   try {
     const [walletResult, transactionResult, orderResult] = await Promise.allSettled([
       getCurrentWallet(),
-      listWalletTransactions(),
-      listRechargeOrders()
+      listWalletTransactions(txPage.value, txPageSize),
+      listRechargeOrders(rechargePage.value, rechargePageSize)
     ]);
 
     const errors: string[] = [];
@@ -300,14 +349,18 @@ async function loadWalletCenter() {
     }
 
     if (transactionResult.status === "fulfilled") {
-      transactions.value = transactionResult.value;
+      transactions.value = transactionResult.value.items;
+      txTotal.value = transactionResult.value.total;
+      txTotalPages.value = transactionResult.value.totalPages;
     } else {
       transactions.value = [];
       errors.push(extractApiErrorMessage(transactionResult.reason, "加载钱包流水失败"));
     }
 
     if (orderResult.status === "fulfilled") {
-      rechargeOrders.value = orderResult.value;
+      rechargeOrders.value = orderResult.value.items;
+      rechargeTotal.value = orderResult.value.total;
+      rechargeTotalPages.value = orderResult.value.totalPages;
     } else {
       rechargeOrders.value = [];
       errors.push(extractApiErrorMessage(orderResult.reason, "加载充值单失败"));

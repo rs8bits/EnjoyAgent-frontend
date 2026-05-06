@@ -47,6 +47,14 @@
               </div>
             </button>
           </div>
+
+          <UiPagination
+            :page="credPage"
+            :size="credPageSize"
+            :total="credTotal"
+            :total-pages="credTotalPages"
+            @change="loadCredentials"
+          />
         </div>
 
         <form class="space-y-4" @submit.prevent="submitCredential">
@@ -135,6 +143,14 @@
               </div>
             </button>
           </div>
+
+          <UiPagination
+            :page="configPage"
+            :size="configPageSize"
+            :total="configTotal"
+            :total-pages="configTotalPages"
+            @change="loadConfigs"
+          />
         </div>
 
         <form class="space-y-4" @submit.prevent="submitConfig">
@@ -207,6 +223,7 @@ import { onMounted, reactive, ref, computed } from "vue";
 import SectionCard from "@/app/components/SectionCard.vue";
 import UiButton from "@/app/components/ui/UiButton.vue";
 import UiCheckbox from "@/app/components/ui/UiCheckbox.vue";
+import UiPagination from "@/app/components/ui/UiPagination.vue";
 import UiSelect from "@/app/components/ui/UiSelect.vue";
 import UiTextField from "@/app/components/ui/UiTextField.vue";
 import UiTextarea from "@/app/components/ui/UiTextarea.vue";
@@ -228,7 +245,15 @@ import type {
 } from "@/app/types/admin";
 
 const credentials = ref<OfficialModelCredential[]>([]);
+const credPage = ref(0);
+const credPageSize = 20;
+const credTotal = ref(0);
+const credTotalPages = ref(0);
 const configs = ref<OfficialModelConfig[]>([]);
+const configPage = ref(0);
+const configPageSize = 20;
+const configTotal = ref(0);
+const configTotalPages = ref(0);
 const loading = ref(false);
 const savingCredential = ref(false);
 const deletingCredential = ref(false);
@@ -395,15 +420,49 @@ function validateConfigForm() {
     && !configErrors.currency;
 }
 
+async function loadCredentials(newPage?: number) {
+  if (newPage !== undefined) credPage.value = newPage;
+  loading.value = true;
+  try {
+    const result = await listAdminOfficialModelCredentials(credPage.value, credPageSize);
+    credentials.value = result.items;
+    credTotal.value = result.total;
+    credTotalPages.value = result.totalPages;
+  } catch (error) {
+    credentialError.value = extractApiErrorMessage(error, "加载托管凭证失败");
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function loadConfigs(newPage?: number) {
+  if (newPage !== undefined) configPage.value = newPage;
+  loading.value = true;
+  try {
+    const result = await listAdminOfficialModelConfigs(configPage.value, configPageSize);
+    configs.value = result.items;
+    configTotal.value = result.total;
+    configTotalPages.value = result.totalPages;
+  } catch (error) {
+    configError.value = extractApiErrorMessage(error, "加载官方模型配置失败");
+  } finally {
+    loading.value = false;
+  }
+}
+
 async function loadAdminModels() {
   loading.value = true;
   try {
-    const [credentialList, configList] = await Promise.all([
-      listAdminOfficialModelCredentials(),
-      listAdminOfficialModelConfigs()
+    const [credentialResult, configResult] = await Promise.all([
+      listAdminOfficialModelCredentials(0, credPageSize),
+      listAdminOfficialModelConfigs(0, configPageSize)
     ]);
-    credentials.value = credentialList;
-    configs.value = configList;
+    credentials.value = credentialResult.items;
+    credTotal.value = credentialResult.total;
+    credTotalPages.value = credentialResult.totalPages;
+    configs.value = configResult.items;
+    configTotal.value = configResult.total;
+    configTotalPages.value = configResult.totalPages;
   } catch (error) {
     credentialError.value = extractApiErrorMessage(error, "加载官方模型中心失败");
   } finally {

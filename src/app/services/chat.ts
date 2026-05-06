@@ -1,5 +1,5 @@
 import { http, getHttpAccessToken } from "@/app/services/http";
-import type { ApiErrorPayload, ApiResponse } from "@/app/types/api";
+import type { ApiErrorPayload, ApiResponse, PagedResponse } from "@/app/types/api";
 import type {
   ChatMessage,
   ChatSession,
@@ -16,16 +16,16 @@ export async function createChatSession(payload: CreateChatSessionPayload) {
   return response.data.data;
 }
 
-export async function listChatSessions(agentId?: number) {
-  const response = await http.get<ApiResponse<ChatSession[]>>("/api/chat/sessions", {
-    params: agentId ? { agentId } : undefined
+export async function listChatSessions(agentId?: number, page = 0, size = 20) {
+  const response = await http.get<PagedResponse<ChatSession>>("/api/chat/sessions", {
+    params: { ...(agentId ? { agentId } : {}), page, size }
   });
-  return response.data.data;
+  return response.data;
 }
 
-export async function listChatMessages(sessionId: number) {
-  const response = await http.get<ApiResponse<ChatMessage[]>>(`/api/chat/sessions/${sessionId}/messages`);
-  return response.data.data;
+export async function listChatMessages(sessionId: number, page = 0, size = 20) {
+  const response = await http.get<PagedResponse<ChatMessage>>(`/api/chat/sessions/${sessionId}/messages`, { params: { page, size } });
+  return response.data;
 }
 
 export async function deleteChatSession(sessionId: number) {

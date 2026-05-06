@@ -11,10 +11,10 @@
 
       <div class="flex flex-wrap items-center gap-3 rounded-full border border-line bg-white px-4 py-3 shadow-card">
         <div class="rounded-full bg-accent-soft px-3 py-1 text-sm font-semibold text-accent">
-          {{ publishedAssets.length }} 个已上架资产
+          {{ publishedTotal }} 个已上架资产
         </div>
         <div class="rounded-full bg-canvas px-3 py-1 text-sm text-muted">
-          {{ submissions.length }} 个我的提交
+          {{ submissionTotal }} 个我的提交
         </div>
       </div>
     </div>
@@ -75,6 +75,14 @@
             </div>
           </button>
         </div>
+
+        <UiPagination
+          :page="publishedPage"
+          :size="publishedPageSize"
+          :total="publishedTotal"
+          :total-pages="publishedTotalPages"
+          @change="loadPublishedAssets"
+        />
       </SectionCard>
 
       <div class="grid min-h-0 gap-5 xl:grid-rows-[auto_minmax(0,1fr)]">
@@ -334,6 +342,14 @@
               </div>
             </div>
           </div>
+
+          <UiPagination
+            :page="submissionPage"
+            :size="submissionPageSize"
+            :total="submissionTotal"
+            :total-pages="submissionTotalPages"
+            @change="loadSubmissions"
+          />
         </SectionCard>
       </div>
     </div>
@@ -346,6 +362,7 @@ import { useRoute, useRouter } from "vue-router";
 import SectionCard from "@/app/components/SectionCard.vue";
 import UiButton from "@/app/components/ui/UiButton.vue";
 import UiCheckbox from "@/app/components/ui/UiCheckbox.vue";
+import UiPagination from "@/app/components/ui/UiPagination.vue";
 import UiSelect from "@/app/components/ui/UiSelect.vue";
 import UiTextField from "@/app/components/ui/UiTextField.vue";
 import UiTextarea from "@/app/components/ui/UiTextarea.vue";
@@ -380,7 +397,15 @@ const route = useRoute();
 const router = useRouter();
 
 const publishedAssets = ref<MarketAsset[]>([]);
+const publishedPage = ref(0);
+const publishedPageSize = 20;
+const publishedTotal = ref(0);
+const publishedTotalPages = ref(0);
 const submissions = ref<MarketAsset[]>([]);
+const submissionPage = ref(0);
+const submissionPageSize = 20;
+const submissionTotal = ref(0);
+const submissionTotalPages = ref(0);
 const selectedAsset = ref<MarketAsset | null>(null);
 const selectedAssetId = ref<number | null>(null);
 const assetTypeFilter = ref("");
@@ -562,30 +587,47 @@ function resetInstallForm() {
 }
 
 async function loadBaseResources() {
-  const [agentList, knowledgeBaseList, mcpServerList, credentialList, userModelList, officialModelList, submissionList] =
-    await Promise.all([
-      listAgents(),
-      listKnowledgeBases(),
-      listMcpServers(),
-      listCredentials(),
-      listModelConfigs(),
-      listOfficialModelConfigs(),
-      listMyMarketSubmissions()
-    ]);
+  const [
+    agentResult,
+    knowledgeBaseResult,
+    mcpServerResult,
+    credentialResult,
+    userModelResult,
+    officialModelResult,
+    submissionResult
+  ] = await Promise.all([
+    listAgents(0, 999),
+    listKnowledgeBases(0, 999),
+    listMcpServers(0, 999),
+    listCredentials(0, 999),
+    listModelConfigs(0, 999),
+    listOfficialModelConfigs(0, 999),
+    listMyMarketSubmissions(0, submissionPageSize)
+  ]);
 
-  agents.value = agentList;
-  knowledgeBases.value = knowledgeBaseList;
-  mcpServers.value = mcpServerList;
-  credentials.value = credentialList;
-  userModels.value = userModelList;
-  officialModels.value = officialModelList;
-  submissions.value = submissionList;
+  agents.value = agentResult.items;
+  knowledgeBases.value = knowledgeBaseResult.items;
+  mcpServers.value = mcpServerResult.items;
+  credentials.value = credentialResult.items;
+  userModels.value = userModelResult.items;
+  officialModels.value = officialModelResult.items;
+  submissions.value = submissionResult.items;
+  submissionTotal.value = submissionResult.total;
+  submissionTotalPages.value = submissionResult.totalPages;
 }
 
-async function loadPublishedAssets() {
+async function loadPublishedAssets(newPage?: number) {
+  if (newPage !== undefined) publishedPage.value = newPage;
   loadingPublished.value = true;
   try {
-    publishedAssets.value = await listPublishedMarketAssets((assetTypeFilter.value || undefined) as MarketAssetType | undefined);
+    const result = await listPublishedMarketAssets(
+      (assetTypeFilter.value || undefined) as MarketAssetType | undefined,
+      publishedPage.value,
+      publishedPageSize
+    );
+    publishedAssets.value = result.items;
+    publishedTotal.value = result.total;
+    publishedTotalPages.value = result.totalPages;
     if (selectedAssetId.value && !publishedAssets.value.some((item) => item.id === selectedAssetId.value)) {
       selectedAssetId.value = null;
       selectedAsset.value = null;
@@ -619,6 +661,18 @@ async function loadSelectedAsset() {
   }
 }
 
+async function loadSubmissions(newPage?: number) {
+  if (newPage !== undefined) submissionPage.value = newPage;
+  try {
+    const result = await listMyMarketSubmissions(submissionPage.value, submissionPageSize);
+    submissions.value = result.items;
+    submissionTotal.value = result.total;
+    submissionTotalPages.value = result.totalPages;
+  } catch (error) {
+    submitAssetError.value = extractApiErrorMessage(error, "加载提交记录失败");
+  }
+}
+
 function selectAsset(id: number) {
   selectedAssetId.value = id;
 }
@@ -649,7 +703,11 @@ async function submitAsset() {
     submitForm.sourceEntityId = "";
     submitForm.summary = "";
     submitForm.description = "";
-    submissions.value = await listMyMarketSubmissions();
+    submissionPage.value = 0;
+    const result = await listMyMarketSubmissions(0, submissionPageSize);
+    submissions.value = result.items;
+    submissionTotal.value = result.total;
+    submissionTotalPages.value = result.totalPages;
   } catch (error) {
     submitAssetError.value = extractApiErrorMessage(error, "提交市场资产失败");
   } finally {
@@ -688,6 +746,7 @@ async function installSelectedAsset() {
 
 watch(assetTypeFilter, async () => {
   selectedAssetId.value = null;
+  publishedPage.value = 0;
   await loadPublishedAssets();
   await loadSelectedAsset();
 });

@@ -1,5 +1,5 @@
 import { http } from "@/app/services/http";
-import type { ApiResponse } from "@/app/types/api";
+import type { ApiResponse, PagedResponse } from "@/app/types/api";
 import type {
   InstallMarketAssetPayload,
   MarketAsset,
@@ -8,16 +8,16 @@ import type {
   SubmitMarketAssetPayload
 } from "@/app/types/market";
 
-export async function listMyMarketSubmissions() {
-  const response = await http.get<ApiResponse<MarketAsset[]>>("/api/market/submissions");
-  return response.data.data;
+export async function listMyMarketSubmissions(page = 0, size = 20) {
+  const response = await http.get<PagedResponse<MarketAsset>>("/api/market/submissions", { params: { page, size } });
+  return response.data;
 }
 
-export async function listPublishedMarketAssets(assetType?: MarketAssetType) {
-  const response = await http.get<ApiResponse<MarketAsset[]>>("/api/market/assets", {
-    params: assetType ? { assetType } : undefined
+export async function listPublishedMarketAssets(assetType?: MarketAssetType, page = 0, size = 20) {
+  const response = await http.get<PagedResponse<MarketAsset>>("/api/market/assets", {
+    params: { ...(assetType ? { assetType } : {}), page, size }
   });
-  return response.data.data;
+  return response.data;
 }
 
 export async function getMarketAsset(id: number) {

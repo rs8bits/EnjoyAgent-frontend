@@ -55,6 +55,14 @@
             <div class="mt-3 text-xs text-muted">{{ formatDateTime(order.createdAt) }}</div>
           </button>
         </div>
+
+        <UiPagination
+          :page="rechargePage"
+          :size="rechargePageSize"
+          :total="rechargeTotal"
+          :total-pages="rechargeTotalPages"
+          @change="loadRechargeOrders"
+        />
       </SectionCard>
 
       <SectionCard
@@ -103,6 +111,14 @@
             <div class="mt-3 text-xs text-muted">{{ formatDateTime(asset.updatedAt) }}</div>
           </button>
         </div>
+
+        <UiPagination
+          :page="marketPage"
+          :size="marketPageSize"
+          :total="marketTotal"
+          :total-pages="marketTotalPages"
+          @change="loadMarketAssets"
+        />
       </SectionCard>
 
       <div class="ea-scroll min-h-0 space-y-5 overflow-y-auto pr-1">
@@ -218,6 +234,7 @@
 import { onMounted, reactive, ref, watch } from "vue";
 import SectionCard from "@/app/components/SectionCard.vue";
 import UiButton from "@/app/components/ui/UiButton.vue";
+import UiPagination from "@/app/components/ui/UiPagination.vue";
 import UiSelect from "@/app/components/ui/UiSelect.vue";
 import UiTextField from "@/app/components/ui/UiTextField.vue";
 import UiTextarea from "@/app/components/ui/UiTextarea.vue";
@@ -237,7 +254,15 @@ import type { MarketAsset, RechargeOrder } from "@/app/types/admin";
 import type { UserWallet } from "@/app/types/billing";
 
 const rechargeOrders = ref<RechargeOrder[]>([]);
+const rechargePage = ref(0);
+const rechargePageSize = 20;
+const rechargeTotal = ref(0);
+const rechargeTotalPages = ref(0);
 const marketAssets = ref<MarketAsset[]>([]);
+const marketPage = ref(0);
+const marketPageSize = 20;
+const marketTotal = ref(0);
+const marketTotalPages = ref(0);
 const selectedRechargeOrder = ref<RechargeOrder | null>(null);
 const selectedRechargeOrderId = ref<number | null>(null);
 const selectedRechargeWallet = ref<UserWallet | null>(null);
@@ -373,23 +398,66 @@ function walletStatusLabel(status: string | null | undefined) {
   return status ?? "未知";
 }
 
+async function loadRechargeOrders(newPage?: number) {
+  if (newPage !== undefined) rechargePage.value = newPage;
+  loading.value = true;
+  try {
+    const result = await listAdminRechargeOrders(
+      rechargeFilter.value || undefined,
+      rechargePage.value,
+      rechargePageSize
+    );
+    rechargeOrders.value = result.items;
+    rechargeTotal.value = result.total;
+    rechargeTotalPages.value = result.totalPages;
+  } catch (error) {
+    reviewError.value = extractApiErrorMessage(error, "加载充值单失败");
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function loadMarketAssets(newPage?: number) {
+  if (newPage !== undefined) marketPage.value = newPage;
+  loading.value = true;
+  try {
+    const result = await listAdminMarketAssets(
+      marketTypeFilter.value || undefined,
+      marketStatusFilter.value || undefined,
+      marketPage.value,
+      marketPageSize
+    );
+    marketAssets.value = result.items;
+    marketTotal.value = result.total;
+    marketTotalPages.value = result.totalPages;
+  } catch (error) {
+    reviewError.value = extractApiErrorMessage(error, "加载市场资产失败");
+  } finally {
+    loading.value = false;
+  }
+}
+
 async function loadReviewCenter() {
   loading.value = true;
   try {
-    const [orderList, assetList] = await Promise.all([
-      listAdminRechargeOrders(rechargeFilter.value || undefined),
-      listAdminMarketAssets(marketTypeFilter.value || undefined, marketStatusFilter.value || undefined)
+    const [orderResult, assetResult] = await Promise.all([
+      listAdminRechargeOrders(rechargeFilter.value || undefined, 0, rechargePageSize),
+      listAdminMarketAssets(marketTypeFilter.value || undefined, marketStatusFilter.value || undefined, 0, marketPageSize)
     ]);
-    rechargeOrders.value = orderList;
-    marketAssets.value = assetList;
+    rechargeOrders.value = orderResult.items;
+    rechargeTotal.value = orderResult.total;
+    rechargeTotalPages.value = orderResult.totalPages;
+    marketAssets.value = assetResult.items;
+    marketTotal.value = assetResult.total;
+    marketTotalPages.value = assetResult.totalPages;
 
     if (selectedRechargeOrderId.value) {
-      const matchedOrder = orderList.find((item) => item.id === selectedRechargeOrderId.value) ?? null;
+      const matchedOrder = orderResult.items.find((item) => item.id === selectedRechargeOrderId.value) ?? null;
       selectedRechargeOrder.value = matchedOrder;
     }
 
     if (selectedMarketAssetId.value) {
-      const matchedAsset = assetList.find((item) => item.id === selectedMarketAssetId.value) ?? null;
+      const matchedAsset = assetResult.items.find((item) => item.id === selectedMarketAssetId.value) ?? null;
       selectedMarketAsset.value = matchedAsset;
     }
   } catch (error) {
@@ -538,7 +606,13 @@ async function offlineMarketAsset() {
   }
 }
 
-watch([rechargeFilter, marketStatusFilter, marketTypeFilter], async () => {
+watch([rechargeFilter], async () => {
+  rechargePage.value = 0;
+  await loadReviewCenter();
+});
+
+watch([marketStatusFilter, marketTypeFilter], async () => {
+  marketPage.value = 0;
   await loadReviewCenter();
 });
 
