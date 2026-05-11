@@ -1,6 +1,6 @@
 import axios from "axios";
-import type { AxiosError } from "axios";
-import type { ApiErrorPayload, ApiResponse } from "@/app/types/api";
+import type { AxiosError, AxiosResponse } from "axios";
+import type { ApiErrorPayload, ApiResponse, PagedResponse } from "@/app/types/api";
 
 let accessToken: string | null = null;
 
@@ -22,6 +22,12 @@ export function setHttpAccessToken(token: string | null) {
 
 export function getHttpAccessToken() {
   return accessToken;
+}
+
+export function extractPagedResponseData<T>(
+  response: AxiosResponse<ApiResponse<PagedResponse<T>>>
+) {
+  return response.data.data;
 }
 
 export function extractApiErrorMessage(error: unknown, fallback = "Request failed") {

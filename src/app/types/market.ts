@@ -1,4 +1,4 @@
-export type MarketAssetType = "AGENT" | "KNOWLEDGE_BASE" | "MCP_SERVER" | string;
+export type MarketAssetType = "AGENT" | "KNOWLEDGE_BASE" | "MCP_SERVER" | "WORKFLOW" | string;
 export type MarketAssetStatus = "PENDING" | "APPROVED" | "REJECTED" | "OFFLINE" | string;
 
 export interface MarketAsset {

@@ -5,7 +5,7 @@
         <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">阶段 7 · 共享市场</div>
         <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">浏览、提交并安装市场资产</h1>
         <p class="mt-2 max-w-3xl text-sm leading-6 text-muted">
-          这里把市场浏览、我的提交和安装结果整合到了一个工作台里。你可以先浏览已上架资产，也可以把自己的 Agent、知识库或 MCP Server 提交到市场。
+          这里把市场浏览、我的提交和安装结果整合到了一个工作台里。你可以先浏览已上架资产，也可以把自己的 Agent、知识库、MCP Server 或工作流提交到市场。
         </p>
       </div>
 
@@ -156,16 +156,16 @@
 
               <div class="grid gap-4 md:grid-cols-2">
                 <UiSelect
-                  v-if="selectedAsset.assetType === 'AGENT'"
+                  v-if="selectedAsset.assetType === 'AGENT' || selectedAsset.assetType === 'WORKFLOW'"
                   v-model="installForm.targetModelConfigId"
                   label="用户聊天模型"
                   :options="userChatModelOptions"
                   placeholder="可选：选择用户聊天模型"
-                  :hint="'如果这个 Agent 模板依赖你的用户模型，需要在这里补上。'"
+                  :hint="'如果这个模板依赖用户模型，可以在这里补上当前租户的模型。'"
                 />
 
                 <UiSelect
-                  v-if="selectedAsset.assetType === 'AGENT'"
+                  v-if="selectedAsset.assetType === 'AGENT' || selectedAsset.assetType === 'WORKFLOW'"
                   v-model="installForm.targetOfficialModelConfigId"
                   label="官方聊天模型"
                   :options="officialChatModelOptions"
@@ -179,6 +179,7 @@
                   label="现有知识库"
                   :options="knowledgeBaseOptions"
                   placeholder="可选：绑定已有知识库"
+                  :hint="selectedAsset.assetType === 'WORKFLOW' ? '安装工作流时会把知识检索节点重定向到这里选择的知识库。' : undefined"
                 />
 
                 <UiSelect
@@ -316,7 +317,7 @@
             v-if="!submissions.length"
             class="rounded-[20px] border border-dashed border-line bg-canvas px-4 py-10 text-center text-sm leading-6 text-muted"
           >
-            你还没有提交过市场资产。先从 Agent、知识库或 MCP Server 里选一个对象试试。
+            你还没有提交过市场资产。先从 Agent、知识库、MCP Server 或工作流里选一个对象试试。
           </div>
 
           <div v-else class="space-y-3">
@@ -378,9 +379,11 @@ import {
   listPublishedMarketAssets,
   submitAgentToMarket,
   submitKnowledgeBaseToMarket,
-  submitMcpServerToMarket
+  submitMcpServerToMarket,
+  submitWorkflowToMarket
 } from "@/app/services/market";
 import { listModelConfigs, listOfficialModelConfigs } from "@/app/services/models";
+import { listWorkflows } from "@/app/services/workflow";
 import type { Agent } from "@/app/types/agent";
 import type { Credential } from "@/app/types/credential";
 import type { KnowledgeBase } from "@/app/types/knowledge";
@@ -392,6 +395,7 @@ import type {
 } from "@/app/types/market";
 import type { McpServer } from "@/app/types/mcp";
 import type { ModelConfig, OfficialModelConfig } from "@/app/types/model";
+import type { Workflow } from "@/app/types/workflow";
 
 const route = useRoute();
 const router = useRouter();
@@ -420,6 +424,7 @@ const installResult = ref<MarketAssetInstallResult | null>(null);
 const agents = ref<Agent[]>([]);
 const knowledgeBases = ref<KnowledgeBase[]>([]);
 const mcpServers = ref<McpServer[]>([]);
+const workflows = ref<Workflow[]>([]);
 const credentials = ref<Credential[]>([]);
 const userModels = ref<ModelConfig[]>([]);
 const officialModels = ref<OfficialModelConfig[]>([]);
@@ -446,7 +451,8 @@ const assetTypeFilterOptions = [
   { label: "全部资产", value: "" },
   { label: "Agent", value: "AGENT" },
   { label: "知识库", value: "KNOWLEDGE_BASE" },
-  { label: "MCP Server", value: "MCP_SERVER" }
+  { label: "MCP Server", value: "MCP_SERVER" },
+  { label: "工作流", value: "WORKFLOW" }
 ];
 
 const submitAssetTypeOptions = assetTypeFilterOptions.filter((item) => item.value);
@@ -457,6 +463,9 @@ const submitResourceOptions = computed(() => {
   }
   if (submitForm.assetType === "MCP_SERVER") {
     return mcpServers.value.map((item) => ({ label: item.name, value: String(item.id) }));
+  }
+  if (submitForm.assetType === "WORKFLOW") {
+    return workflows.value.map((item) => ({ label: item.name, value: String(item.id) }));
   }
   return agents.value.map((item) => ({ label: item.name, value: String(item.id) }));
 });
@@ -518,6 +527,9 @@ function assetTypeLabel(type: string | null | undefined) {
   if (type === "MCP_SERVER") {
     return "MCP Server";
   }
+  if (type === "WORKFLOW") {
+    return "工作流";
+  }
   return type ?? "未知类型";
 }
 
@@ -560,6 +572,9 @@ function resourceTypeLabel(type: string | null | undefined) {
   if (type === "MCP_SERVER") {
     return "MCP Server";
   }
+  if (type === "WORKFLOW") {
+    return "工作流";
+  }
   if (type === "MCP_TOOL") {
     return "MCP 工具";
   }
@@ -591,6 +606,7 @@ async function loadBaseResources() {
     agentResult,
     knowledgeBaseResult,
     mcpServerResult,
+    workflowResult,
     credentialResult,
     userModelResult,
     officialModelResult,
@@ -599,6 +615,7 @@ async function loadBaseResources() {
     listAgents(0, 999),
     listKnowledgeBases(0, 999),
     listMcpServers(0, 999),
+    listWorkflows(0, 999),
     listCredentials(0, 999),
     listModelConfigs(0, 999),
     listOfficialModelConfigs(0, 999),
@@ -608,6 +625,7 @@ async function loadBaseResources() {
   agents.value = agentResult.items;
   knowledgeBases.value = knowledgeBaseResult.items;
   mcpServers.value = mcpServerResult.items;
+  workflows.value = workflowResult.items;
   credentials.value = credentialResult.items;
   userModels.value = userModelResult.items;
   officialModels.value = officialModelResult.items;
@@ -696,6 +714,8 @@ async function submitAsset() {
       await submitKnowledgeBaseToMarket(sourceId, payload);
     } else if (submitForm.assetType === "MCP_SERVER") {
       await submitMcpServerToMarket(sourceId, payload);
+    } else if (submitForm.assetType === "WORKFLOW") {
+      await submitWorkflowToMarket(sourceId, payload);
     } else {
       await submitAgentToMarket(sourceId, payload);
     }

@@ -25,8 +25,7 @@ export const booleanSwitchOptions = [
 ] as const;
 
 export const mcpTransportOptions = [
-  { label: "Streamable HTTP", value: "STREAMABLE_HTTP" },
-  { label: "SSE", value: "SSE" }
+  { label: "Streamable HTTP", value: "STREAMABLE_HTTP" }
 ] as const;
 
 export const mcpAuthOptions = [

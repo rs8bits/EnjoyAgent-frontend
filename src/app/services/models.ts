@@ -1,4 +1,4 @@
-import { http } from "@/app/services/http";
+import { extractPagedResponseData, http } from "@/app/services/http";
 import type { ApiResponse, PagedResponse } from "@/app/types/api";
 import type {
   CreateModelConfigPayload,
@@ -8,8 +8,10 @@ import type {
 } from "@/app/types/model";
 
 export async function listModelConfigs(page = 0, size = 20) {
-  const response = await http.get<PagedResponse<ModelConfig>>("/api/model-configs", { params: { page, size } });
-  return response.data;
+  const response = await http.get<ApiResponse<PagedResponse<ModelConfig>>>("/api/model-configs", {
+    params: { page, size }
+  });
+  return extractPagedResponseData(response);
 }
 
 export async function createModelConfig(payload: CreateModelConfigPayload) {
@@ -27,6 +29,9 @@ export async function deleteModelConfig(id: number) {
 }
 
 export async function listOfficialModelConfigs(page = 0, size = 20) {
-  const response = await http.get<PagedResponse<OfficialModelConfig>>("/api/official-model-configs", { params: { page, size } });
-  return response.data;
+  const response = await http.get<ApiResponse<PagedResponse<OfficialModelConfig>>>(
+    "/api/official-model-configs",
+    { params: { page, size } }
+  );
+  return extractPagedResponseData(response);
 }

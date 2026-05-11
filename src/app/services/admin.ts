@@ -1,4 +1,4 @@
-import { http } from "@/app/services/http";
+import { extractPagedResponseData, http } from "@/app/services/http";
 import type { UserWallet } from "@/app/types/billing";
 import type { ApiResponse, PagedResponse } from "@/app/types/api";
 import type {
@@ -17,8 +17,11 @@ import type {
 } from "@/app/types/admin";
 
 export async function listAdminOfficialModelCredentials(page = 0, size = 20) {
-  const response = await http.get<PagedResponse<OfficialModelCredential>>("/api/admin/official-models/credentials", { params: { page, size } });
-  return response.data;
+  const response = await http.get<ApiResponse<PagedResponse<OfficialModelCredential>>>(
+    "/api/admin/official-models/credentials",
+    { params: { page, size } }
+  );
+  return extractPagedResponseData(response);
 }
 
 export async function createAdminOfficialModelCredential(payload: CreateOfficialModelCredentialPayload) {
@@ -36,8 +39,11 @@ export async function deleteAdminOfficialModelCredential(id: number) {
 }
 
 export async function listAdminOfficialModelConfigs(page = 0, size = 20) {
-  const response = await http.get<PagedResponse<OfficialModelConfig>>("/api/admin/official-models/configs", { params: { page, size } });
-  return response.data;
+  const response = await http.get<ApiResponse<PagedResponse<OfficialModelConfig>>>(
+    "/api/admin/official-models/configs",
+    { params: { page, size } }
+  );
+  return extractPagedResponseData(response);
 }
 
 export async function createAdminOfficialModelConfig(payload: CreateOfficialModelConfigPayload) {
@@ -55,10 +61,13 @@ export async function deleteAdminOfficialModelConfig(id: number) {
 }
 
 export async function listAdminRechargeOrders(status?: string, page = 0, size = 20) {
-  const response = await http.get<PagedResponse<RechargeOrder>>("/api/admin/billing/recharge-orders", {
-    params: { ...(status ? { status } : {}), page, size }
-  });
-  return response.data;
+  const response = await http.get<ApiResponse<PagedResponse<RechargeOrder>>>(
+    "/api/admin/billing/recharge-orders",
+    {
+      params: { ...(status ? { status } : {}), page, size }
+    }
+  );
+  return extractPagedResponseData(response);
 }
 
 export async function approveAdminRechargeOrder(id: number, payload: ReviewRemarkPayload) {
@@ -82,7 +91,7 @@ export async function adjustAdminUserWallet(userId: number, payload: AdjustUserW
 }
 
 export async function listAdminMarketAssets(assetType?: MarketAssetType, status?: MarketAssetStatus, page = 0, size = 20) {
-  const response = await http.get<PagedResponse<MarketAsset>>("/api/admin/market/assets", {
+  const response = await http.get<ApiResponse<PagedResponse<MarketAsset>>>("/api/admin/market/assets", {
     params: {
       assetType: assetType || undefined,
       status: status || undefined,
@@ -90,7 +99,7 @@ export async function listAdminMarketAssets(assetType?: MarketAssetType, status?
       size
     }
   });
-  return response.data;
+  return extractPagedResponseData(response);
 }
 
 export async function approveAdminMarketAsset(id: number, payload: ReviewRemarkPayload) {

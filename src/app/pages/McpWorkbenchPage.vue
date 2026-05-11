@@ -768,19 +768,26 @@ async function loadBaseResources() {
     credentials.value = credentialResult.items;
     agents.value = agentResult.items;
 
+    const loadedServers = serverResult.items;
+    const loadedAgents = agentResult.items;
+
     const routeServerId = parseRouteId("serverId");
     const routeAgentId = parseRouteId("agentId");
 
-    if (routeAgentId && agentList.some((agent) => agent.id === routeAgentId)) {
+    if (routeAgentId && loadedAgents.some((agent) => agent.id === routeAgentId)) {
       selectedAgentId.value = String(routeAgentId);
-    } else if (!selectedAgentId.value && agentList.length) {
-      selectedAgentId.value = String(agentList[0].id);
+    } else if (selectedAgentId.value && !loadedAgents.some((agent) => String(agent.id) === selectedAgentId.value)) {
+      selectedAgentId.value = loadedAgents.length ? String(loadedAgents[0].id) : "";
+    } else if (!selectedAgentId.value && loadedAgents.length) {
+      selectedAgentId.value = String(loadedAgents[0].id);
     }
 
-    if (routeServerId && serverList.some((server) => server.id === routeServerId)) {
+    if (routeServerId && loadedServers.some((server) => server.id === routeServerId)) {
       selectedServerId.value = routeServerId;
-    } else if (!selectedServerId.value && serverList.length) {
-      selectedServerId.value = serverList[0].id;
+    } else if (selectedServerId.value && !loadedServers.some((server) => server.id === selectedServerId.value)) {
+      selectedServerId.value = loadedServers.length ? loadedServers[0].id : null;
+    } else if (!selectedServerId.value && loadedServers.length) {
+      selectedServerId.value = loadedServers[0].id;
     }
 
     syncServerForm(selectedServer.value);
@@ -929,6 +936,7 @@ async function syncSelectedServerTools() {
     tools.value = await syncMcpServerTools(selectedServerId.value);
     serializeToolsToEditor(tools.value);
     await loadBaseResources();
+    await loadToolsForSelectedServer();
   } catch (error) {
     toolError.value = extractApiErrorMessage(error, "同步远端工具目录失败");
   } finally {
@@ -947,6 +955,7 @@ async function saveToolsSnapshot() {
     tools.value = await replaceMcpServerTools(selectedServerId.value, { tools: parsed });
     serializeToolsToEditor(tools.value);
     await loadBaseResources();
+    await loadToolsForSelectedServer();
   } catch (error) {
     toolError.value = error instanceof Error ? error.message : extractApiErrorMessage(error, "保存工具快照失败");
   } finally {
@@ -984,7 +993,10 @@ async function saveAgentBindings() {
       toolName: item.toolName,
       serverName: item.serverName
     }));
+    bindingTotal.value = result.length;
+    bindingTotalPages.value = result.length ? Math.ceil(result.length / bindingPageSize) : 0;
     await loadToolCallLogsForSelectedAgent();
+    await loadBindingsForSelectedAgent();
   } catch (error) {
     bindingError.value = extractApiErrorMessage(error, "保存 Agent 工具绑定失败");
   } finally {

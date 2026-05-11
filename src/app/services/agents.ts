@@ -1,10 +1,12 @@
-import { http } from "@/app/services/http";
+import { extractPagedResponseData, http } from "@/app/services/http";
 import type { Agent, CreateAgentPayload, UpdateAgentPayload } from "@/app/types/agent";
-import type { PagedResponse } from "@/app/types/api";
+import type { ApiResponse, PagedResponse } from "@/app/types/api";
 
 export async function listAgents(page = 0, size = 20) {
-  const response = await http.get<PagedResponse<Agent>>("/api/agents", { params: { page, size } });
-  return response.data;
+  const response = await http.get<ApiResponse<PagedResponse<Agent>>>("/api/agents", {
+    params: { page, size }
+  });
+  return extractPagedResponseData(response);
 }
 
 export async function createAgent(payload: CreateAgentPayload) {

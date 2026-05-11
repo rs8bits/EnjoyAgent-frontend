@@ -1,4 +1,4 @@
-import { http } from "@/app/services/http";
+import { extractPagedResponseData, http } from "@/app/services/http";
 import type { ApiResponse, PagedResponse } from "@/app/types/api";
 import type {
   AgentToolBinding,
@@ -17,8 +17,10 @@ import type {
 } from "@/app/types/mcp";
 
 export async function listMcpServers(page = 0, size = 20) {
-  const response = await http.get<PagedResponse<McpServer>>("/api/mcp/servers", { params: { page, size } });
-  return response.data;
+  const response = await http.get<ApiResponse<PagedResponse<McpServer>>>("/api/mcp/servers", {
+    params: { page, size }
+  });
+  return extractPagedResponseData(response);
 }
 
 export async function createMcpServer(payload: CreateMcpServerPayload) {
@@ -46,15 +48,18 @@ export async function replaceMcpServerTools(id: number, payload: ReplaceMcpServe
 }
 
 export async function listMcpTools(serverId?: number, page = 0, size = 20) {
-  const response = await http.get<PagedResponse<McpTool>>("/api/mcp/tools", {
+  const response = await http.get<ApiResponse<PagedResponse<McpTool>>>("/api/mcp/tools", {
     params: { ...(serverId ? { serverId } : {}), page, size }
   });
-  return response.data;
+  return extractPagedResponseData(response);
 }
 
 export async function listAgentToolBindings(agentId: number, page = 0, size = 20) {
-  const response = await http.get<PagedResponse<AgentToolBinding>>(`/api/agents/${agentId}/tool-bindings`, { params: { page, size } });
-  return response.data;
+  const response = await http.get<ApiResponse<PagedResponse<AgentToolBinding>>>(
+    `/api/agents/${agentId}/tool-bindings`,
+    { params: { page, size } }
+  );
+  return extractPagedResponseData(response);
 }
 
 export async function replaceAgentToolBindings(agentId: number, payload: ReplaceAgentToolBindingsPayload) {

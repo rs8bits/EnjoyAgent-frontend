@@ -1,4 +1,4 @@
-import { http } from "@/app/services/http";
+import { extractPagedResponseData, http } from "@/app/services/http";
 import type { ApiResponse, PagedResponse } from "@/app/types/api";
 import type {
   InstallMarketAssetPayload,
@@ -9,15 +9,17 @@ import type {
 } from "@/app/types/market";
 
 export async function listMyMarketSubmissions(page = 0, size = 20) {
-  const response = await http.get<PagedResponse<MarketAsset>>("/api/market/submissions", { params: { page, size } });
-  return response.data;
+  const response = await http.get<ApiResponse<PagedResponse<MarketAsset>>>("/api/market/submissions", {
+    params: { page, size }
+  });
+  return extractPagedResponseData(response);
 }
 
 export async function listPublishedMarketAssets(assetType?: MarketAssetType, page = 0, size = 20) {
-  const response = await http.get<PagedResponse<MarketAsset>>("/api/market/assets", {
+  const response = await http.get<ApiResponse<PagedResponse<MarketAsset>>>("/api/market/assets", {
     params: { ...(assetType ? { assetType } : {}), page, size }
   });
-  return response.data;
+  return extractPagedResponseData(response);
 }
 
 export async function getMarketAsset(id: number) {
@@ -35,6 +37,11 @@ export async function submitKnowledgeBaseToMarket(knowledgeBaseId: number, paylo
     `/api/market/assets/knowledge-bases/${knowledgeBaseId}/submit`,
     payload
   );
+  return response.data.data;
+}
+
+export async function submitWorkflowToMarket(workflowId: number, payload: SubmitMarketAssetPayload) {
+  const response = await http.post<ApiResponse<MarketAsset>>(`/api/market/assets/workflows/${workflowId}/submit`, payload);
   return response.data.data;
 }
 

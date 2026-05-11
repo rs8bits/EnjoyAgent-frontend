@@ -303,7 +303,8 @@ const marketTypeOptions = [
   { label: "全部类型", value: "" },
   { label: "Agent", value: "AGENT" },
   { label: "知识库", value: "KNOWLEDGE_BASE" },
-  { label: "MCP Server", value: "MCP_SERVER" }
+  { label: "MCP Server", value: "MCP_SERVER" },
+  { label: "工作流", value: "WORKFLOW" }
 ];
 
 function formatDateTime(value: string | null | undefined) {
@@ -384,6 +385,9 @@ function assetTypeLabel(type: string | null | undefined) {
   }
   if (type === "MCP_SERVER") {
     return "MCP Server";
+  }
+  if (type === "WORKFLOW") {
+    return "工作流";
   }
   return type ?? "未知类型";
 }

@@ -34,7 +34,7 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
-import { Bot, Boxes, CreditCard, Database, KeyRound, LayoutDashboard, ShieldCheck, Sparkles, ToyBrick, Wallet, Waypoints, Wrench } from "lucide-vue-next";
+import { Bot, Boxes, CreditCard, Database, KeyRound, LayoutDashboard, ShieldCheck, Sparkles, ToyBrick, Wallet, Waypoints, Workflow, Wrench } from "lucide-vue-next";
 import { useRoute } from "vue-router";
 import { useAuthStore } from "@/app/stores/auth";
 
@@ -49,7 +49,8 @@ const sections = computed(() => {
         { label: "工作台首页", to: "/app/home", icon: Sparkles },
         { label: "Agent 管理", to: "/app/agents", icon: Bot },
         { label: "知识库管理", to: "/app/knowledge", icon: Database },
-        { label: "MCP 工具", to: "/app/mcp", icon: Wrench }
+        { label: "MCP 工具", to: "/app/mcp", icon: Wrench },
+        { label: "工作流", to: "/app/workflows", icon: Workflow }
       ]
     },
     {

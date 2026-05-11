@@ -1,4 +1,4 @@
-import { http, getHttpAccessToken } from "@/app/services/http";
+import { extractPagedResponseData, http, getHttpAccessToken } from "@/app/services/http";
 import type { ApiErrorPayload, ApiResponse, PagedResponse } from "@/app/types/api";
 import type {
   ChatMessage,
@@ -17,15 +17,18 @@ export async function createChatSession(payload: CreateChatSessionPayload) {
 }
 
 export async function listChatSessions(agentId?: number, page = 0, size = 20) {
-  const response = await http.get<PagedResponse<ChatSession>>("/api/chat/sessions", {
+  const response = await http.get<ApiResponse<PagedResponse<ChatSession>>>("/api/chat/sessions", {
     params: { ...(agentId ? { agentId } : {}), page, size }
   });
-  return response.data;
+  return extractPagedResponseData(response);
 }
 
 export async function listChatMessages(sessionId: number, page = 0, size = 20) {
-  const response = await http.get<PagedResponse<ChatMessage>>(`/api/chat/sessions/${sessionId}/messages`, { params: { page, size } });
-  return response.data;
+  const response = await http.get<ApiResponse<PagedResponse<ChatMessage>>>(
+    `/api/chat/sessions/${sessionId}/messages`,
+    { params: { page, size } }
+  );
+  return extractPagedResponseData(response);
 }
 
 export async function deleteChatSession(sessionId: number) {

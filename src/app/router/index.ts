@@ -18,6 +18,8 @@ import NotFoundPage from "@/app/pages/NotFoundPage.vue";
 import OfficialModelsPage from "@/app/pages/OfficialModelsPage.vue";
 import RegisterPage from "@/app/pages/RegisterPage.vue";
 import WalletCenterPage from "@/app/pages/WalletCenterPage.vue";
+import WorkflowCanvasPage from "@/app/pages/WorkflowCanvasPage.vue";
+import WorkflowsPage from "@/app/pages/WorkflowsPage.vue";
 import WorkspaceHomePage from "@/app/pages/WorkspaceHomePage.vue";
 
 const router = createRouter({
@@ -83,6 +85,18 @@ const router = createRouter({
           name: "market-hub",
           component: MarketHubPage,
           meta: { requiresAuth: true, title: "共享市场" }
+        },
+        {
+          path: "workflows",
+          name: "workflows",
+          component: WorkflowsPage,
+          meta: { requiresAuth: true, title: "工作流" }
+        },
+        {
+          path: "workflows/:id/canvas",
+          name: "workflow-canvas",
+          component: WorkflowCanvasPage,
+          meta: { requiresAuth: true, title: "工作流编辑" }
         },
         {
           path: "knowledge/import",
