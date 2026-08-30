@@ -22,7 +22,7 @@
     "@vue-flow/core": "^1.48.2",
     "axios": "^1.19.0",
     "lucide-vue-next": "^0.511.0",
-    "pinia": "^2.3.1",
+    "pinia": "^4.0.3",
     "vue": "^3.5.41",
     "vue-router": "^4.5.1"
   },
