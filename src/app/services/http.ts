@@ -1,27 +1,113 @@
 import axios from "axios";
-import type { AxiosError, AxiosResponse } from "axios";
+import type { AxiosResponse } from "axios";
 import type { ApiErrorPayload, ApiResponse, PagedResponse } from "@/app/types/api";
 
-let accessToken: string | null = null;
+let unauthorizedHandler: (() => void | Promise<void>) | null = null;
+let unauthorizedPromise: Promise<void> | null = null;
+
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || "";
 
 export const http = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || "",
-  timeout: 20_000
+  timeout: 20_000,
+  withCredentials: true
 });
 
-http.interceptors.request.use((config) => {
-  if (accessToken) {
-    config.headers.Authorization = `Bearer ${accessToken}`;
+async function handleUnauthorized() {
+  if (!unauthorizedPromise) {
+    unauthorizedPromise = Promise.resolve(unauthorizedHandler?.()).finally(() => {
+      unauthorizedPromise = null;
+    });
   }
-  return config;
-});
-
-export function setHttpAccessToken(token: string | null) {
-  accessToken = token;
+  try {
+    await unauthorizedPromise;
+  } catch {
+    // Authentication state has already been cleared; keep the original HTTP error observable.
+  }
 }
 
-export function getHttpAccessToken() {
-  return accessToken;
+http.interceptors.response.use(
+  (response) => response,
+  async (error: unknown) => {
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      await handleUnauthorized();
+    }
+    return Promise.reject(error);
+  }
+);
+
+export function setHttpUnauthorizedHandler(handler: (() => void | Promise<void>) | null) {
+  unauthorizedHandler = handler;
+}
+
+export function joinApiUrl(baseUrl: string, path: string) {
+  if (!baseUrl) {
+    return path;
+  }
+  return `${baseUrl.replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
+}
+
+export function resolveApiUrl(path: string) {
+  return joinApiUrl(apiBaseUrl, path);
+}
+
+interface AuthenticatedFetchOptions extends RequestInit {
+  timeoutMs?: number;
+}
+
+export async function authenticatedFetch(path: string, options: AuthenticatedFetchOptions = {}) {
+  const { timeoutMs = 20_000, signal, headers, ...requestInit } = options;
+  const controller = new AbortController();
+  let timedOut = false;
+  const abortFromCaller = () => controller.abort(signal?.reason);
+  signal?.addEventListener("abort", abortFromCaller, { once: true });
+  if (signal?.aborted) {
+    controller.abort(signal.reason);
+  }
+  const timeoutId = timeoutMs > 0
+    ? globalThis.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, timeoutMs)
+    : null;
+
+  try {
+    const response = await fetch(resolveApiUrl(path), {
+      ...requestInit,
+      credentials: "include",
+      headers,
+      signal: controller.signal
+    });
+    if (response.status === 401) {
+      await handleUnauthorized();
+    }
+    return response;
+  } catch (error) {
+    if (timedOut) {
+      throw new Error("请求超时，请稍后重试。");
+    }
+    throw error;
+  } finally {
+    if (timeoutId !== null) {
+      globalThis.clearTimeout(timeoutId);
+    }
+    signal?.removeEventListener("abort", abortFromCaller);
+  }
+}
+
+export function isRequestCanceled(error: unknown) {
+  return axios.isCancel(error)
+    || (error instanceof DOMException && error.name === "AbortError")
+    || (error instanceof Error && error.name === "AbortError");
+}
+
+export async function extractFetchErrorMessage(response: Response, fallback = "请求失败") {
+  try {
+    const errorBody = await response.json() as ApiResponse<ApiErrorPayload>;
+    return errorBody?.data?.message || errorBody?.message || fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 export function extractPagedResponseData<T>(
@@ -31,7 +117,10 @@ export function extractPagedResponseData<T>(
 }
 
 export function extractApiErrorMessage(error: unknown, fallback = "Request failed") {
-  const axiosError = error as AxiosError<ApiResponse<ApiErrorPayload>>;
+  if (!axios.isAxiosError<ApiResponse<ApiErrorPayload>>(error)) {
+    return error instanceof Error && error.message ? error.message : fallback;
+  }
+  const axiosError = error;
   if (axiosError.response?.status === 413) {
     return "上传文件过大，请控制在服务端允许的大小范围内后重试。";
   }

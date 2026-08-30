@@ -2,11 +2,17 @@ import { extractPagedResponseData, http } from "@/app/services/http";
 import type { Agent, CreateAgentPayload, UpdateAgentPayload } from "@/app/types/agent";
 import type { ApiResponse, PagedResponse } from "@/app/types/api";
 
-export async function listAgents(page = 0, size = 20) {
+export async function listAgents(page = 0, size = 20, signal?: AbortSignal, search?: string) {
   const response = await http.get<ApiResponse<PagedResponse<Agent>>>("/api/agents", {
-    params: { page, size }
+    params: { page, size, search: search?.trim() || undefined },
+    signal
   });
   return extractPagedResponseData(response);
+}
+
+export async function getAgent(id: number, signal?: AbortSignal) {
+  const response = await http.get<ApiResponse<Agent>>(`/api/agents/${id}`, { signal });
+  return response.data.data;
 }
 
 export async function createAgent(payload: CreateAgentPayload) {

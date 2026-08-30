@@ -7,9 +7,10 @@ import type {
   UpdateKnowledgeBasePayload
 } from "@/app/types/knowledge";
 
-export async function listKnowledgeBases(page = 0, size = 20) {
+export async function listKnowledgeBases(page = 0, size = 20, signal?: AbortSignal) {
   const response = await http.get<ApiResponse<PagedResponse<KnowledgeBase>>>("/api/knowledge-bases", {
-    params: { page, size }
+    params: { page, size },
+    signal
   });
   return extractPagedResponseData(response);
 }
@@ -33,22 +34,23 @@ export async function deleteKnowledgeBase(id: number) {
   await http.delete<ApiResponse<null>>(`/api/knowledge-bases/${id}`);
 }
 
-export async function listKnowledgeDocuments(knowledgeBaseId: number, page = 0, size = 20) {
+export async function listKnowledgeDocuments(knowledgeBaseId: number, page = 0, size = 20, signal?: AbortSignal) {
   const response = await http.get<ApiResponse<PagedResponse<KnowledgeDocument>>>(
     `/api/knowledge-bases/${knowledgeBaseId}/documents`,
-    { params: { page, size } }
+    { params: { page, size }, signal }
   );
   return extractPagedResponseData(response);
 }
 
-export async function uploadKnowledgeDocument(knowledgeBaseId: number, file: File) {
+export async function uploadKnowledgeDocument(knowledgeBaseId: number, file: File, signal?: AbortSignal) {
   const formData = new FormData();
   formData.append("file", file);
   const response = await http.post<ApiResponse<KnowledgeDocument>>(
     `/api/knowledge-bases/${knowledgeBaseId}/documents`,
     formData,
     {
-      timeout: 300_000
+      timeout: 300_000,
+      signal
     }
   );
   return response.data.data;
@@ -61,6 +63,13 @@ export async function deleteKnowledgeDocument(knowledgeBaseId: number, documentI
 export async function reindexKnowledgeDocument(knowledgeBaseId: number, documentId: number) {
   const response = await http.post<ApiResponse<KnowledgeDocument>>(
     `/api/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/reindex-search`
+  );
+  return response.data.data;
+}
+
+export async function retryKnowledgeDocument(knowledgeBaseId: number, documentId: number) {
+  const response = await http.post<ApiResponse<KnowledgeDocument>>(
+    `/api/knowledge-bases/${knowledgeBaseId}/documents/${documentId}/retry`
   );
   return response.data.data;
 }

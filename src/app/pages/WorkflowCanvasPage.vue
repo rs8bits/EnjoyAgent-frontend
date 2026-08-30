@@ -1,13 +1,13 @@
 <script setup lang="ts">
-import { markRaw, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowLeft, Database, FlaskConical, GitBranch, Loader2, Play, Repeat, Save, Sparkles, StopCircle, Wrench } from "lucide-vue-next";
+import { ArrowLeft, Database, FlaskConical, GitBranch, Loader2, Play, Repeat, Save, Sparkles, StopCircle, Trash2, Wrench } from "lucide-vue-next";
 import { VueFlow, MarkerType } from "@vue-flow/core";
 import { Background } from "@vue-flow/background";
 import { Controls } from "@vue-flow/controls";
 import type { Node, Edge, Connection, EdgeMouseEvent, GraphNode, VueFlowStore, XYPosition } from "@vue-flow/core";
 import { getCanvas, getWorkflow, saveCanvas } from "@/app/services/workflow";
-import type { Workflow, WorkflowNodeItem, WorkflowEdgeItem } from "@/app/types/workflow";
+import type { Workflow, WorkflowCanvas, WorkflowNodeItem, WorkflowEdgeItem } from "@/app/types/workflow";
 import StartNode from "@/app/components/workflow/nodes/StartNode.vue";
 import LlmNode from "@/app/components/workflow/nodes/LlmNode.vue";
 import KnowledgeNode from "@/app/components/workflow/nodes/KnowledgeNode.vue";
@@ -16,14 +16,29 @@ import ConditionNode from "@/app/components/workflow/nodes/ConditionNode.vue";
 import LoopNode from "@/app/components/workflow/nodes/LoopNode.vue";
 import EndNode from "@/app/components/workflow/nodes/EndNode.vue";
 import NodeConfigPanel from "@/app/components/workflow/NodeConfigPanel.vue";
-import { extractApiErrorMessage, getHttpAccessToken } from "@/app/services/http";
+import { authenticatedFetch, extractApiErrorMessage, extractFetchErrorMessage, isRequestCanceled } from "@/app/services/http";
+import { consumeSseStream } from "@/app/services/sse";
+import { fetchAllPages } from "@/app/services/pagination";
 import UiSelect from "@/app/components/ui/UiSelect.vue";
 import { listModelConfigs } from "@/app/services/models";
 import type { ModelConfig } from "@/app/types/model";
 import { listKnowledgeBases } from "@/app/services/knowledge";
 import type { KnowledgeBase } from "@/app/types/knowledge";
-import { listMcpTools } from "@/app/services/mcp";
-import type { McpTool } from "@/app/types/mcp";
+import { listMcpServers, listMcpTools } from "@/app/services/mcp";
+import type { McpServer, McpTool } from "@/app/types/mcp";
+import type { ApiResponse, PagedResponse } from "@/app/types/api";
+import {
+  appendCanvasEdge,
+  createCanvasHydrationCoordinator,
+  createNewNodeConfigJson,
+  createUniqueNodeKey,
+  removeCanvasEdge,
+  removeCanvasNode,
+} from "@/app/utils/workflowCanvas";
+import {
+  findNodeVariableReferences,
+  validateCanvasWorkflowVariableReferences,
+} from "@/app/utils/workflowVariables";
 
 const route = useRoute();
 const router = useRouter();
@@ -36,6 +51,12 @@ const loadingModels = ref(false);
 const availableChatModels = ref<ModelConfig[]>([]);
 const availableKnowledgeBases = ref<KnowledgeBase[]>([]);
 const availableTools = ref<McpTool[]>([]);
+const availableMcpServers = ref<McpServer[]>([]);
+const resourceError = ref("");
+const historyError = ref("");
+let testRunController: AbortController | null = null;
+let historyController: AbortController | null = null;
+let resourceController: AbortController | null = null;
 
 const nodeTypes = {
   start: markRaw(StartNode),
@@ -54,22 +75,53 @@ const defaultEdgeOptions = {
   style: defaultEdgeStyle,
   markerEnd: defaultEdgeMarker,
 };
+const nodeKeyPattern = /^[A-Za-z0-9_-]{1,64}$/;
 
 const nodes = ref<Node[]>([]);
 const edges = ref<Edge[]>([]);
+const canvasHydration = createCanvasHydrationCoordinator<Node, Edge>();
+const flowNodes = computed<Node[]>({
+  get: () => nodes.value,
+  set: (nextNodes) => {
+    if (canvasHydration.shouldAcceptNodes(nextNodes)) {
+      nodes.value = nextNodes;
+    }
+  },
+});
+const flowEdges = computed<Edge[]>({
+  get: () => edges.value,
+  set: (nextEdges) => {
+    if (canvasHydration.shouldAcceptEdges(nextEdges)) {
+      edges.value = nextEdges;
+    }
+  },
+});
 const draggedType = ref<string | null>(null);
 const canvasContainer = ref<HTMLElement | null>(null);
 const flowInstance = ref<VueFlowStore | null>(null);
+let suppressPaletteClick = false;
 
 const selectedNodeId = ref<string | null>(null);
 const selectedNode = ref<Node | null>(null);
 const selectedEdgeId = ref<string | null>(null);
 
 onMounted(async () => {
-  await Promise.all([loadWorkflow(), loadCanvas(), loadAvailableChatModels(), loadAvailableKnowledgeBases(), loadAvailableTools()]);
   document.addEventListener("drop", onGlobalDragEnd);
   document.addEventListener("dragend", onGlobalDragEnd);
   document.addEventListener("keydown", onKeyDown);
+  const controller = new AbortController();
+  resourceController = controller;
+  await Promise.all([
+    loadWorkflow(controller.signal),
+    loadCanvas(controller.signal),
+    loadAvailableChatModels(controller.signal),
+    loadAvailableKnowledgeBases(controller.signal),
+    loadAvailableMcpServers(controller.signal),
+    loadAvailableTools(controller.signal)
+  ]);
+  if (resourceController === controller) {
+    resourceController = null;
+  }
 });
 
 onBeforeUnmount(() => {
@@ -77,29 +129,49 @@ onBeforeUnmount(() => {
   document.removeEventListener("dragend", onGlobalDragEnd);
   document.removeEventListener("keydown", onKeyDown);
   document.body.style.userSelect = "";
+  testRunController?.abort();
+  testRunController = null;
+  historyController?.abort();
+  historyController = null;
+  resourceController?.abort();
+  resourceController = null;
 });
 
-async function loadWorkflow() {
+async function loadWorkflow(signal?: AbortSignal) {
   try {
-    workflow.value = await getWorkflow(workflowId);
+    workflow.value = await getWorkflow(workflowId, signal);
   } catch (error) {
-    console.error("Failed to load workflow:", error);
+    if (!isRequestCanceled(error)) {
+      resourceError.value = extractApiErrorMessage(error, "加载工作流失败");
+    }
   }
 }
 
-async function loadCanvas() {
+async function loadCanvas(signal?: AbortSignal) {
   try {
-    const canvas = await getCanvas(workflowId);
-    nodes.value = canvas.nodes.map(toVueFlowNode);
-    edges.value = canvas.edges.map(toVueFlowEdge);
-  } catch {
-    // New workflow with no canvas data yet
+    applyCanvas(await getCanvas(workflowId, signal));
+  } catch (error) {
+    if (!isRequestCanceled(error)) {
+      resourceError.value = extractApiErrorMessage(error, "加载工作流画布失败");
+    }
   }
+}
+
+function applyCanvas(canvas: WorkflowCanvas) {
+  const nodeKeyById = new Map(
+    canvas.nodes.flatMap((node) => node.id === undefined ? [] : [[node.id, node.nodeKey] as const])
+  );
+  const snapshot = canvasHydration.stage(
+    canvas.nodes.map(toVueFlowNode),
+    canvas.edges.map((edge) => toVueFlowEdge(edge, nodeKeyById)),
+  );
+  replaceCanvasElements(snapshot.nodes, snapshot.edges);
+  void synchronizeHydratedCanvas();
 }
 
 function toVueFlowNode(n: WorkflowNodeItem): Node {
   return {
-    id: String(n.id),
+    id: n.nodeKey,
     type: n.nodeType.toLowerCase(),
     position: { x: n.positionX, y: n.positionY },
     draggable: true,
@@ -107,16 +179,22 @@ function toVueFlowNode(n: WorkflowNodeItem): Node {
     connectable: true,
     data: {
       label: n.name,
+      nodeKey: n.nodeKey,
       configJson: n.configJson,
     },
   };
 }
 
-function toVueFlowEdge(e: WorkflowEdgeItem): Edge {
+function toVueFlowEdge(e: WorkflowEdgeItem, nodeKeyById: Map<number, string>): Edge {
+  const source = nodeKeyById.get(e.sourceNodeId);
+  const target = nodeKeyById.get(e.targetNodeId);
+  if (!source || !target) {
+    throw new Error("工作流画布包含指向不存在节点的连线。");
+  }
   return {
     id: String(e.id),
-    source: String(e.sourceNodeId),
-    target: String(e.targetNodeId),
+    source,
+    target,
     sourceHandle: e.sourceHandle || undefined,
     targetHandle: e.targetHandle || undefined,
     animated: true,
@@ -140,8 +218,11 @@ function onDrop(event: DragEvent) {
   const type = draggedType.value || event.dataTransfer?.getData("application/vueflow");
   if (!type) return;
 
-  const position = getDropPosition(event);
+  addNode(type, getDropPosition(event));
+  onGlobalDragEnd();
+}
 
+function addNode(type: string, position?: XYPosition) {
   const labels: Record<string, string> = {
     start: "开始",
     llm: "LLM",
@@ -152,23 +233,28 @@ function onDrop(event: DragEvent) {
     end: "结束",
   };
 
+  const nodeKey = createUniqueNodeKey(type, nodes.value.map((node) => node.id));
+
   const newNode: Node = {
-    id: `node_${Date.now()}`,
+    id: nodeKey,
     type,
-    position,
+    position: position ?? {
+      x: 40 + (nodes.value.length % 3) * 220,
+      y: 40 + Math.floor(nodes.value.length / 3) * 120
+    },
     draggable: true,
     selectable: true,
     connectable: true,
     data: {
       label: labels[type] || type,
-      configJson: "{}",
+      nodeKey,
+      configJson: createNewNodeConfigJson(type),
     },
   };
 
   nodes.value = [...nodes.value, newNode];
   selectedNodeId.value = newNode.id;
   selectedNode.value = newNode;
-  onGlobalDragEnd();
 }
 
 function getDropPosition(event: DragEvent): XYPosition {
@@ -208,6 +294,28 @@ function toFlowPosition(event: DragEvent): XYPosition | null {
 
 function onPaneReady(instance: VueFlowStore) {
   flowInstance.value = instance;
+  const snapshot = canvasHydration.markPaneReady();
+  if (snapshot) {
+    replaceCanvasElements(snapshot.nodes, snapshot.edges);
+    void synchronizeHydratedCanvas();
+  } else {
+    instance.setNodes(nodes.value);
+    instance.setEdges(edges.value);
+  }
+}
+
+async function synchronizeHydratedCanvas() {
+  const snapshot = canvasHydration.readySnapshot();
+  if (!snapshot) return;
+
+  replaceCanvasElements(snapshot.nodes, snapshot.edges);
+  await nextTick();
+  const latest = canvasHydration.readySnapshot();
+  if (!latest || latest.revision !== snapshot.revision) return;
+
+  replaceCanvasElements(snapshot.nodes, snapshot.edges);
+  await nextTick();
+  canvasHydration.complete(snapshot.revision);
 }
 
 function normalizeHandle(handle?: string | null) {
@@ -222,41 +330,33 @@ function isSameConnection(edge: Edge, connection: Connection) {
 }
 
 function getCurrentCanvasState() {
-  const snapshot = flowInstance.value?.toObject();
   return {
-    currentNodes: (snapshot?.nodes as Node[] | undefined) ?? nodes.value,
-    currentEdges: (snapshot?.edges as Edge[] | undefined) ?? edges.value,
+    currentNodes: nodes.value,
+    currentEdges: edges.value,
   };
 }
 
-function getCurrentEdges() {
-  return getCurrentCanvasState().currentEdges;
-}
-
-function syncCanvasRefsFromStore() {
-  const snapshot = flowInstance.value?.toObject();
-  if (!snapshot) {
-    return;
-  }
-  nodes.value = snapshot.nodes as Node[];
-  edges.value = snapshot.edges as Edge[];
-}
-
-function canCreateConnection(connection: Connection, sourceNode?: GraphNode | Node, targetNode?: GraphNode | Node): boolean {
+function canCreateConnection(
+  connection: Connection,
+  sourceNode?: GraphNode | Node,
+  targetNode?: GraphNode | Node,
+  rejectDuplicate = true,
+): boolean {
   if (!connection.source || !connection.target || connection.source === connection.target) return false;
   const { currentNodes, currentEdges } = getCurrentCanvasState();
   const source = sourceNode ?? currentNodes.find((node) => node.id === connection.source);
   const target = targetNode ?? currentNodes.find((node) => node.id === connection.target);
   if (!source || !target) return false;
-  const existing = currentEdges.some((edge) => isSameConnection(edge, connection));
-  if (existing) return false;
+  if (rejectDuplicate && currentEdges.some((edge) => isSameConnection(edge, connection))) return false;
   if (target.type === "start") return false;
   if (source.type === "end") return false;
   return true;
 }
 
 function isValidConnection(connection: Connection, elements: { sourceNode: GraphNode; targetNode: GraphNode }): boolean {
-  return canCreateConnection(connection, elements.sourceNode, elements.targetNode);
+  // Vue Flow also calls this validator while hydrating persisted edges. Duplicate rejection
+  // belongs in onConnect; checking refs here would reject the very edge setEdges is loading.
+  return canCreateConnection(connection, elements.sourceNode, elements.targetNode, false);
 }
 
 function toWorkflowEdge(connection: Connection): Edge {
@@ -278,24 +378,12 @@ function toWorkflowEdge(connection: Connection): Edge {
   };
 }
 
-function autoConnectEdge(connection: Connection): (Connection & Partial<Edge>) | false {
-  if (!canCreateConnection(connection)) {
-    return false;
-  }
-  return toWorkflowEdge(connection);
-}
-
 function onConnect(connection: Connection) {
+  if (!canCreateConnection(connection)) {
+    return;
+  }
   const edge = toWorkflowEdge(connection);
-  nextTick(() => {
-    const exists = getCurrentEdges().some((currentEdge) => isSameConnection(currentEdge, connection));
-    if (!exists && flowInstance.value) {
-      flowInstance.value.addEdges(edge);
-    } else if (!exists) {
-      edges.value = [...edges.value, edge];
-    }
-    syncCanvasRefsFromStore();
-  });
+  replaceCanvasElements(nodes.value, appendCanvasEdge(edges.value, edge));
   selectedEdgeId.value = null;
 }
 
@@ -329,6 +417,62 @@ function onUpdateConfig(nodeId: string, configJson: string) {
     : node);
 }
 
+function replaceCanvasElements(nextNodes: Node[], nextEdges: Edge[]) {
+  nodes.value = nextNodes;
+  edges.value = nextEdges;
+  if (flowInstance.value) {
+    flowInstance.value.setNodes(nextNodes);
+    flowInstance.value.setEdges(nextEdges);
+  }
+}
+
+function deleteNode(nodeId: string) {
+  const { currentNodes, currentEdges } = getCurrentCanvasState();
+  const references = findNodeVariableReferences(
+    currentNodes.filter((node) => node.id !== nodeId),
+    nodeId
+  );
+  if (references.length) {
+    const affected = references.map((reference) => `“${reference.nodeLabel}” [${reference.nodeKey}]`).join("、");
+    if (!window.confirm(`节点被 ${affected} 的变量引用。删除后这些引用将失效，且修复前无法保存画布。仍要删除吗？`)) {
+      return;
+    }
+  }
+  const next = removeCanvasNode(currentNodes, currentEdges, nodeId);
+  replaceCanvasElements(next.nodes, next.edges);
+
+  if (selectedNodeId.value === nodeId) {
+    selectedNodeId.value = null;
+    selectedNode.value = null;
+  }
+  if (selectedEdgeId.value && !next.edges.some((edge) => edge.id === selectedEdgeId.value)) {
+    selectedEdgeId.value = null;
+  }
+  if (references.length) {
+    void nextTick(() => {
+      saveMessage.value = "已删除被引用节点；请修复下游节点中的失效变量后再保存";
+    });
+  }
+}
+
+function deleteEdge(edgeId: string) {
+  const { currentNodes, currentEdges } = getCurrentCanvasState();
+  replaceCanvasElements(currentNodes, removeCanvasEdge(currentEdges, edgeId));
+  if (selectedEdgeId.value === edgeId) {
+    selectedEdgeId.value = null;
+  }
+}
+
+function deleteSelectedElement() {
+  if (selectedNodeId.value) {
+    deleteNode(selectedNodeId.value);
+    return;
+  }
+  if (selectedEdgeId.value) {
+    deleteEdge(selectedEdgeId.value);
+  }
+}
+
 function onKeyDown(event: KeyboardEvent) {
   const target = event.target;
   if (target instanceof HTMLElement) {
@@ -338,17 +482,9 @@ function onKeyDown(event: KeyboardEvent) {
     }
   }
 
-  if ((event.key === "Delete" || event.key === "Backspace") && selectedNodeId.value) {
-    edges.value = edges.value.filter(
-      (e) => e.source !== selectedNodeId.value && e.target !== selectedNodeId.value
-    );
-    nodes.value = nodes.value.filter((node) => node.id !== selectedNodeId.value);
-    selectedNodeId.value = null;
-    selectedNode.value = null;
-  }
-  if ((event.key === "Delete" || event.key === "Backspace") && selectedEdgeId.value) {
-    edges.value = edges.value.filter((edge) => edge.id !== selectedEdgeId.value);
-    selectedEdgeId.value = null;
+  if ((event.key === "Delete" || event.key === "Backspace") && (selectedNodeId.value || selectedEdgeId.value)) {
+    event.preventDefault();
+    deleteSelectedElement();
   }
 }
 
@@ -380,6 +516,13 @@ async function handleSave() {
     return;
   }
 
+  const variableIssues = validateCanvasWorkflowVariableReferences(currentNodes, currentEdges);
+  if (variableIssues.length) {
+    const firstIssue = variableIssues[0];
+    saveMessage.value = `节点“${firstIssue.nodeLabel}”变量引用无效：${firstIssue.warning}`;
+    return;
+  }
+
   saving.value = true;
   saveMessage.value = "";
 
@@ -388,22 +531,10 @@ async function handleSave() {
 
   try {
     const savedCanvas = await saveCanvas(workflowId, {
-      nodes: currentNodes.map((n) => ({
-        name: (n.data?.label as string) || n.type || "",
-        nodeType: (n.type || "LLM").toUpperCase(),
-        configJson: (n.data?.configJson as string) || "{}",
-        positionX: Math.round(n.position.x),
-        positionY: Math.round(n.position.y),
-      })),
-      edges: currentEdges.map((e) => ({
-        sourceNodeIndex: nodeIndexMap.get(e.source) ?? 0,
-        targetNodeIndex: nodeIndexMap.get(e.target) ?? 0,
-        sourceHandle: e.sourceHandle || null,
-        targetHandle: e.targetHandle || null,
-      })),
+      nodes: currentNodes.map(toCanvasNodePayload),
+      edges: currentEdges.map((edge) => toCanvasEdgePayload(edge, nodeIndexMap)),
     });
-    nodes.value = savedCanvas.nodes.map(toVueFlowNode);
-    edges.value = savedCanvas.edges.map(toVueFlowEdge);
+    applyCanvas(savedCanvas);
     selectedNodeId.value = null;
     selectedNode.value = null;
     saveMessage.value = "画布已保存";
@@ -429,6 +560,7 @@ const paletteNodes = [
 ];
 
 function onDragStart(event: DragEvent, nodeType: string) {
+  suppressPaletteClick = true;
   draggedType.value = nodeType;
   document.body.style.userSelect = "none";
   event.dataTransfer?.setData("application/vueflow", nodeType);
@@ -438,40 +570,79 @@ function onDragStart(event: DragEvent, nodeType: string) {
 function onGlobalDragEnd() {
   draggedType.value = null;
   document.body.style.userSelect = "";
+  globalThis.setTimeout(() => {
+    suppressPaletteClick = false;
+  }, 0);
 }
 
-async function loadAvailableChatModels() {
+function onPaletteClick(nodeType: string) {
+  if (!suppressPaletteClick) {
+    addNode(nodeType);
+  }
+}
+
+function focusWorkflowTab(panel: "properties" | "test") {
+  showTestPanel.value = panel === "test";
+  void nextTick(() => {
+    document.getElementById(`workflow-${panel}-tab`)?.focus();
+  });
+}
+
+async function loadAvailableChatModels(signal?: AbortSignal) {
   loadingModels.value = true;
   try {
-    const result = await listModelConfigs(0, 100);
-    availableChatModels.value = result.items.filter(
+    const result = await fetchAllPages((page, size) => listModelConfigs(page, size, signal));
+    if (signal?.aborted) return;
+    availableChatModels.value = result.filter(
       (model) => model.enabled && model.modelType === "CHAT"
     );
     if (!testModelConfigId.value && availableChatModels.value.length > 0) {
       testModelConfigId.value = availableChatModels.value[0].id;
     }
-  } catch {
-    availableChatModels.value = [];
+  } catch (error) {
+    if (!isRequestCanceled(error)) {
+      resourceError.value = "加载聊天模型失败，请检查网络后重试。";
+    }
   } finally {
-    loadingModels.value = false;
+    if (!signal?.aborted) {
+      loadingModels.value = false;
+    }
   }
 }
 
-async function loadAvailableKnowledgeBases() {
+async function loadAvailableKnowledgeBases(signal?: AbortSignal) {
   try {
-    const result = await listKnowledgeBases(0, 100);
-    availableKnowledgeBases.value = result.items.filter((kb) => kb.enabled);
-  } catch {
-    availableKnowledgeBases.value = [];
+    const result = await fetchAllPages((page, size) => listKnowledgeBases(page, size, signal));
+    if (signal?.aborted) return;
+    availableKnowledgeBases.value = result.filter((kb) => kb.enabled);
+  } catch (error) {
+    if (!isRequestCanceled(error)) {
+      resourceError.value = "加载知识库失败，请检查网络后重试。";
+    }
   }
 }
 
-async function loadAvailableTools() {
+async function loadAvailableMcpServers(signal?: AbortSignal) {
   try {
-    const result = await listMcpTools(undefined, 0, 200);
-    availableTools.value = result.items.filter((t) => t.enabled);
-  } catch {
-    availableTools.value = [];
+    const result = await fetchAllPages((page, size) => listMcpServers(page, size, signal));
+    if (signal?.aborted) return;
+    availableMcpServers.value = result;
+  } catch (error) {
+    if (!isRequestCanceled(error)) {
+      resourceError.value = "加载 MCP Server 失败，请检查网络后重试。";
+    }
+  }
+}
+
+async function loadAvailableTools(signal?: AbortSignal) {
+  try {
+    const result = await fetchAllPages((page, size) => listMcpTools(undefined, page, size, signal));
+    if (signal?.aborted) return;
+    availableTools.value = result;
+  } catch (error) {
+    if (!isRequestCanceled(error)) {
+      resourceError.value = "加载 MCP 工具失败，请检查网络后重试。";
+    }
   }
 }
 
@@ -483,7 +654,19 @@ const testRunning = ref(false);
 const testEvents = ref<{ type: string; nodeName: string; output?: Record<string, unknown>; data?: Record<string, unknown>; finalOutput?: string }[]>([]);
 const testFinalOutput = ref("");
 const testError = ref("");
-const execHistory = ref<{ id: number; triggerType: string; status: string; inputJson: string; outputJson: string; nodeCount: number; durationMs: number; errorMessage: string; createdAt: string }[]>([]);
+interface WorkflowExecutionHistory {
+  id: number;
+  triggerType: string;
+  status: string;
+  inputJson: string;
+  outputJson: string;
+  nodeCount: number;
+  durationMs: number;
+  errorMessage: string;
+  createdAt: string;
+}
+
+const execHistory = ref<WorkflowExecutionHistory[]>([]);
 const selectedTestModelConfigId = ref("");
 
 watch(availableChatModels, (models) => {
@@ -497,21 +680,28 @@ watch(selectedTestModelConfigId, (value) => {
 });
 
 async function loadHistory() {
+  historyController?.abort();
+  const controller = new AbortController();
+  historyController = controller;
+  historyError.value = "";
   try {
-    const token = getHttpAccessToken();
-    if (!token) {
-      execHistory.value = [];
-      return;
-    }
-    const res = await fetch(`/api/workflows/${workflowId}/executions?page=0&size=10`, {
-      headers: { Authorization: `Bearer ${token}` },
+    const res = await authenticatedFetch(`/api/workflows/${workflowId}/executions?page=0&size=10`, {
+      signal: controller.signal
     });
     if (!res.ok) {
-      throw new Error("加载执行历史失败");
+      throw new Error(await extractFetchErrorMessage(res, "加载执行历史失败"));
     }
-    const data = await res.json();
-    execHistory.value = data.data?.items || [];
-  } catch { /* ignore */ }
+    const data = await res.json() as ApiResponse<PagedResponse<WorkflowExecutionHistory>>;
+    if (!controller.signal.aborted) {
+      execHistory.value = Array.isArray(data.data?.items) ? data.data.items : [];
+    }
+  } catch (error) {
+    if (!isRequestCanceled(error)) {
+      historyError.value = error instanceof Error ? error.message : "加载执行历史失败";
+    }
+  } finally {
+    if (historyController === controller) historyController = null;
+  }
 }
 
 async function runTest() {
@@ -521,101 +711,57 @@ async function runTest() {
   testFinalOutput.value = "";
   testError.value = "";
 
-  const token = getHttpAccessToken();
-  if (!token) {
-    testError.value = "未找到登录凭证，请重新登录后再试。";
-    testRunning.value = false;
-    return;
-  }
-
+  testRunController?.abort();
+  const controller = new AbortController();
+  testRunController = controller;
   try {
     const draftCanvas = buildCanvasPayload();
-    const response = await fetch(`/api/workflows/${workflowId}/test-run`, {
+    const response = await authenticatedFetch(`/api/workflows/${workflowId}/test-run`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         userInput: testInput.value,
         modelConfigId: testModelConfigId.value,
         canvas: draftCanvas,
       }),
+      signal: controller.signal
     });
     if (!response.ok) {
-      let message = "测试运行失败";
-      try {
-        const errorBody = await response.json();
-        message = errorBody?.data?.message || errorBody?.message || message;
-      } catch {
-        // ignore json parse errors
-      }
-      throw new Error(message);
+      throw new Error(await extractFetchErrorMessage(response, "测试运行失败"));
     }
-    const reader = response.body?.getReader();
-    if (!reader) {
+    if (!response.body) {
       throw new Error("当前浏览器环境不支持测试流式响应。");
     }
-    const decoder = new TextDecoder();
-    let buffer = "";
-
-    const dispatchEventBlock = (rawEvent: string) => {
-      const lines = rawEvent.split("\n");
-      let eventType = "message";
-      const dataLines: string[] = [];
-
-      for (const line of lines) {
-        if (line.startsWith("event:")) {
-          eventType = line.slice(6).trim();
-          continue;
-        }
-        if (line.startsWith("data:")) {
-          dataLines.push(line.slice(5).trim());
-        }
-      }
-
-      if (!dataLines.length) {
-        return;
-      }
-
-      try {
-        const data = JSON.parse(dataLines.join("\n"));
-        if (eventType === "completed") {
-          testFinalOutput.value = data.finalOutput || "";
-          return;
-        }
-        if (eventType === "error") {
-          testError.value = data.message || "测试运行失败";
-          return;
-        }
+    let completed = false;
+    await consumeSseStream(response.body, ({ event, data: rawData }) => {
+      const data = JSON.parse(rawData) as Record<string, unknown>;
+      if (event === "completed") {
+        completed = true;
+        testFinalOutput.value = typeof data.finalOutput === "string" ? data.finalOutput : "";
+      } else if (event === "error") {
+        throw new Error(typeof data.message === "string" ? data.message : "测试运行失败");
+      } else {
         testEvents.value.push({
-          type: eventType,
-          nodeName: data.nodeName || "",
-          output: data.data,
+          type: event,
+          nodeName: typeof data.nodeName === "string" ? data.nodeName : "",
+          output: typeof data.data === "object" && data.data ? data.data as Record<string, unknown> : undefined,
           data,
         });
-      } catch {
-        // ignore parse errors from incomplete events
       }
-    };
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-      const events = buffer.split("\n\n");
-      buffer = events.pop() || "";
-      for (const event of events) {
-        dispatchEventBlock(event);
-      }
-    }
-
-    buffer += decoder.decode();
-    if (buffer.trim()) {
-      dispatchEventBlock(buffer);
+    }, { signal: controller.signal });
+    if (!completed) {
+      throw new Error("测试连接在完成前中断，请重试。");
     }
   } catch (e) {
-    testError.value = (e as Error).message || "测试运行失败";
+    if (!isRequestCanceled(e)) {
+      testError.value = e instanceof Error ? e.message : "测试运行失败";
+    }
   } finally {
-    testRunning.value = false;
-    loadHistory();
+    if (testRunController === controller) {
+      testRunning.value = false;
+      testRunController = null;
+      void loadHistory();
+    }
   }
 }
 
@@ -625,19 +771,37 @@ function buildCanvasPayload() {
   currentNodes.forEach((node, index) => nodeIndexMap.set(node.id, index));
 
   return {
-    nodes: currentNodes.map((node) => ({
-      name: (node.data?.label as string) || node.type || "",
-      nodeType: (node.type || "LLM").toUpperCase(),
-      configJson: (node.data?.configJson as string) || "{}",
-      positionX: Math.round(node.position.x),
-      positionY: Math.round(node.position.y),
-    })),
-    edges: currentEdges.map((edge) => ({
-      sourceNodeIndex: nodeIndexMap.get(edge.source) ?? 0,
-      targetNodeIndex: nodeIndexMap.get(edge.target) ?? 0,
-      sourceHandle: edge.sourceHandle || null,
-      targetHandle: edge.targetHandle || null,
-    })),
+    nodes: currentNodes.map(toCanvasNodePayload),
+    edges: currentEdges.map((edge) => toCanvasEdgePayload(edge, nodeIndexMap)),
+  };
+}
+
+function toCanvasNodePayload(node: Node) {
+  const nodeKey = typeof node.data?.nodeKey === "string" ? node.data.nodeKey : node.id;
+  if (!nodeKeyPattern.test(nodeKey)) {
+    throw new Error("节点 Key 必须是 1-64 位字母、数字、下划线或连字符。");
+  }
+  return {
+    name: (node.data?.label as string) || node.type || "",
+    nodeKey,
+    nodeType: (node.type || "LLM").toUpperCase(),
+    configJson: (node.data?.configJson as string) || "{}",
+    positionX: Math.round(node.position.x),
+    positionY: Math.round(node.position.y),
+  };
+}
+
+function toCanvasEdgePayload(edge: Edge, nodeIndexMap: Map<string, number>) {
+  const sourceNodeIndex = nodeIndexMap.get(edge.source);
+  const targetNodeIndex = nodeIndexMap.get(edge.target);
+  if (sourceNodeIndex === undefined || targetNodeIndex === undefined) {
+    throw new Error("画布包含指向已删除节点的连线，请删除异常连线后重试。");
+  }
+  return {
+    sourceNodeIndex,
+    targetNodeIndex,
+    sourceHandle: edge.sourceHandle || null,
+    targetHandle: edge.targetHandle || null,
   };
 }
 
@@ -645,24 +809,38 @@ watch(showTestPanel, (v) => { if (v) loadHistory(); });
 </script>
 
 <template>
-  <div class="flex h-full flex-col">
+  <div class="flex min-h-full flex-col lg:h-full lg:min-h-0">
     <!-- Top toolbar -->
-    <div class="flex shrink-0 items-center justify-between border-b border-line px-4 py-3">
-      <div class="flex items-center gap-4">
-        <button class="flex items-center gap-1 text-sm text-muted hover:text-ink" @click="goBack">
+    <div class="flex shrink-0 flex-col gap-3 border-b border-line px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+      <div class="flex min-w-0 items-center gap-4">
+        <button type="button" class="flex shrink-0 items-center gap-1 text-sm text-muted hover:text-ink" @click="goBack">
           <ArrowLeft class="h-4 w-4" />
           返回
         </button>
         <div class="h-5 w-px bg-line"></div>
-        <h2 class="text-sm font-semibold text-ink">
+        <h2 class="truncate text-sm font-semibold text-ink">
           {{ workflow?.name || "工作流画布" }}
         </h2>
       </div>
-      <div class="flex items-center gap-3">
+      <div class="flex flex-wrap items-center justify-end gap-3">
+        <span v-if="resourceError" class="max-w-sm truncate text-xs text-rose-500" role="alert">
+          {{ resourceError }}
+        </span>
         <span v-if="saveMessage" class="text-xs" :class="saveMessage === '画布已保存' ? 'text-emerald-600' : 'text-rose-500'">
           {{ saveMessage }}
         </span>
         <button
+          v-if="selectedNodeId || selectedEdgeId"
+          type="button"
+          class="flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-medium text-rose-600 hover:bg-rose-100"
+          :aria-label="selectedNodeId ? '删除选中节点' : '删除选中连线'"
+          @click="deleteSelectedElement"
+        >
+          <Trash2 class="h-4 w-4" />
+          {{ selectedNodeId ? "删除节点" : "删除连线" }}
+        </button>
+        <button
+          type="button"
           class="flex items-center gap-1.5 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white shadow-sm hover:brightness-105 disabled:opacity-50"
           :disabled="saving"
           @click="handleSave"
@@ -674,29 +852,32 @@ watch(showTestPanel, (v) => { if (v) loadHistory(); });
     </div>
 
     <!-- Main area -->
-    <div class="flex min-h-0 flex-1">
+    <div class="flex flex-col lg:min-h-0 lg:flex-1 lg:flex-row">
       <!-- Left palette -->
-      <div class="flex shrink-0 flex-col gap-2 border-r border-line bg-white p-3" style="width: 160px">
-        <div class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">节点面板</div>
-        <div
+      <div class="flex w-full shrink-0 gap-2 overflow-x-auto border-b border-line bg-white p-3 lg:w-40 lg:flex-col lg:overflow-visible lg:border-r lg:border-b-0">
+        <div class="mr-2 flex shrink-0 items-center text-xs font-semibold uppercase tracking-wide text-muted lg:mb-2 lg:mr-0">节点面板</div>
+        <button
           v-for="item in paletteNodes"
           :key="item.type"
+          type="button"
           draggable="true"
-          class="flex cursor-grab items-center gap-2 rounded-xl border px-3 py-2.5 text-sm active:cursor-grabbing"
+          class="flex shrink-0 cursor-grab items-center gap-2 rounded-xl border px-3 py-2.5 text-sm active:cursor-grabbing"
           :class="[item.bg, item.border]"
+          :aria-label="`添加${item.label}节点`"
+          @click="onPaletteClick(item.type)"
           @dragstart="onDragStart($event, item.type)"
           @dragend="onGlobalDragEnd"
         >
           <component :is="item.icon" class="h-4 w-4" :class="item.color" />
           <span class="text-sm font-medium">{{ item.label }}</span>
-        </div>
+        </button>
       </div>
 
       <!-- Canvas -->
-      <div ref="canvasContainer" class="min-w-0 flex-1" @dragover="onDragOver" @drop="onDrop">
+      <div ref="canvasContainer" class="h-[60vh] min-h-[420px] w-full min-w-0 shrink-0 lg:h-auto lg:min-h-0 lg:flex-1" @dragover="onDragOver" @drop="onDrop">
         <VueFlow
-          v-model:nodes="nodes"
-          v-model:edges="edges"
+          v-model:nodes="flowNodes"
+          v-model:edges="flowEdges"
           :node-types="nodeTypes"
           :default-edge-options="defaultEdgeOptions"
           :is-valid-connection="isValidConnection"
@@ -707,7 +888,8 @@ watch(showTestPanel, (v) => { if (v) loadHistory(); });
           :snap-grid="[20, 20]"
           :connect-on-click="true"
           :connection-radius="36"
-          :auto-connect="autoConnectEdge"
+          :auto-connect="false"
+          :delete-key-code="null"
           :auto-pan-on-connect="true"
           :elevate-edges-on-select="true"
           fit-view-on-init
@@ -723,37 +905,67 @@ watch(showTestPanel, (v) => { if (v) loadHistory(); });
       </div>
 
       <!-- Right panel: config / test toggle -->
-      <div class="flex shrink-0 flex-col border-l border-line bg-white" style="width:280px">
-        <div class="flex border-b border-line">
+      <div class="flex min-h-[480px] w-full shrink-0 flex-col border-t border-line bg-white lg:min-h-0 lg:w-[360px] lg:border-t-0 lg:border-l">
+        <div class="flex border-b border-line" role="tablist" aria-label="工作流侧边面板">
           <button
+            id="workflow-properties-tab"
+            type="button"
+            role="tab"
+            :aria-selected="!showTestPanel"
+            aria-controls="workflow-properties-panel"
             class="flex-1 py-2.5 text-xs font-semibold transition"
             :class="!showTestPanel ? 'text-accent border-b-2 border-accent' : 'text-muted hover:text-ink'"
             @click="showTestPanel = false"
+            @keydown.right.prevent="focusWorkflowTab('test')"
           >属性</button>
           <button
+            id="workflow-test-tab"
+            type="button"
+            role="tab"
+            :aria-selected="showTestPanel"
+            aria-controls="workflow-test-panel"
             class="flex-1 py-2.5 text-xs font-semibold transition"
             :class="showTestPanel ? 'text-accent border-b-2 border-accent' : 'text-muted hover:text-ink'"
             @click="showTestPanel = true"
+            @keydown.left.prevent="focusWorkflowTab('properties')"
           >🧪 测试</button>
         </div>
 
-        <NodeConfigPanel
+        <div
           v-if="!showTestPanel"
-          :selected-node="selectedNode"
-          :available-model-configs="availableChatModels"
-          :available-knowledge-bases="availableKnowledgeBases"
-          :available-tools="availableTools"
-          @update-label="onUpdateLabel"
-          @update-config="onUpdateConfig"
-          @close="onPaneClick"
-        />
+          id="workflow-properties-panel"
+          role="tabpanel"
+          aria-labelledby="workflow-properties-tab"
+          class="min-h-0 flex-1 overflow-y-auto"
+        >
+          <NodeConfigPanel
+            :selected-node="selectedNode"
+            :available-model-configs="availableChatModels"
+            :available-knowledge-bases="availableKnowledgeBases"
+            :available-tools="availableTools"
+            :available-mcp-servers="availableMcpServers"
+            :canvas-nodes="nodes"
+            :canvas-edges="edges"
+            @update-label="onUpdateLabel"
+            @update-config="onUpdateConfig"
+            @delete-node="deleteNode"
+            @close="onPaneClick"
+          />
+        </div>
 
         <!-- Test panel -->
-        <div v-if="showTestPanel" class="flex flex-1 flex-col overflow-y-auto p-4">
+        <div
+          v-if="showTestPanel"
+          id="workflow-test-panel"
+          role="tabpanel"
+          aria-labelledby="workflow-test-tab"
+          class="flex flex-1 flex-col overflow-y-auto p-4"
+        >
           <div class="mb-3 text-xs font-semibold text-ink">测试运行</div>
 
-          <label class="mb-1 text-xs text-muted">输入消息</label>
+          <label for="workflow-test-input" class="mb-1 text-xs text-muted">输入消息</label>
           <textarea
+            id="workflow-test-input"
             v-model="testInput"
             rows="3"
             class="mb-3 w-full rounded-[14px] border border-line px-3 py-2 text-sm focus:border-accent focus:ring-2 focus:ring-accent/10 focus:outline-none"
@@ -771,6 +983,7 @@ watch(showTestPanel, (v) => { if (v) loadHistory(); });
           />
 
           <button
+            type="button"
             class="mb-4 flex items-center justify-center gap-2 rounded-full bg-accent px-4 py-2 text-sm font-medium text-white hover:brightness-105 disabled:opacity-50"
             :disabled="testRunning || !testInput.trim() || !testModelConfigId"
             @click="runTest"
@@ -780,7 +993,10 @@ watch(showTestPanel, (v) => { if (v) loadHistory(); });
             {{ testRunning ? "运行中..." : "运行测试" }}
           </button>
 
-          <div v-if="testError" class="mb-3 rounded-lg bg-rose-50 p-3 text-xs text-rose-600">{{ testError }}</div>
+          <div v-if="testError" class="mb-3 rounded-lg bg-rose-50 p-3 text-xs text-rose-600" role="alert">{{ testError }}</div>
+          <div v-if="historyError" class="mb-3 rounded-lg bg-amber-50 p-3 text-xs text-amber-700" role="alert">
+            {{ historyError }}
+          </div>
 
           <div v-if="testEvents.length" class="text-xs font-semibold text-ink mb-2">执行日志</div>
           <div v-for="(evt, i) in testEvents" :key="i" class="mb-1.5 rounded-lg border px-3 py-1.5 text-xs">

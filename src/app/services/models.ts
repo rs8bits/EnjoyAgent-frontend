@@ -7,9 +7,10 @@ import type {
   UpdateModelConfigPayload
 } from "@/app/types/model";
 
-export async function listModelConfigs(page = 0, size = 20) {
+export async function listModelConfigs(page = 0, size = 20, signal?: AbortSignal) {
   const response = await http.get<ApiResponse<PagedResponse<ModelConfig>>>("/api/model-configs", {
-    params: { page, size }
+    params: { page, size },
+    signal
   });
   return extractPagedResponseData(response);
 }
@@ -28,10 +29,15 @@ export async function deleteModelConfig(id: number) {
   await http.delete<ApiResponse<null>>(`/api/model-configs/${id}`);
 }
 
-export async function listOfficialModelConfigs(page = 0, size = 20) {
+export async function listOfficialModelConfigs(
+  page = 0,
+  size = 20,
+  signal?: AbortSignal,
+  modelType?: string
+) {
   const response = await http.get<ApiResponse<PagedResponse<OfficialModelConfig>>>(
     "/api/official-model-configs",
-    { params: { page, size } }
+    { params: { page, size, modelType: modelType || undefined }, signal }
   );
   return extractPagedResponseData(response);
 }

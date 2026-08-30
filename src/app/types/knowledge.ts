@@ -16,11 +16,26 @@ export interface KnowledgeDocument {
   fileName: string;
   contentType: string | null;
   fileSize: number | null;
-  status: string;
+  status: KnowledgeDocumentStatus;
   chunkCount: number | null;
+  processingAttempts: number;
+  nextRetryAt: string | null;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  processingStartedAt: string | null;
+  completedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
+
+export type KnowledgeDocumentStatus =
+  | "QUEUED"
+  | "PROCESSING"
+  | "RETRYING"
+  | "INDEXING"
+  | "READY"
+  | "FAILED"
+  | "DELETING";
 
 export interface CreateKnowledgeBasePayload {
   name: string;

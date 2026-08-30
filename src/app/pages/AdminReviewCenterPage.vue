@@ -2,11 +2,8 @@
   <div class="ea-scroll flex h-full min-h-0 flex-col overflow-y-auto p-5 lg:p-6">
     <div class="mb-5 flex flex-col gap-5 border-b border-line pb-5 lg:flex-row lg:items-end lg:justify-between">
       <div>
-        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">阶段 8 · 审核中心</div>
+        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">审核中心</div>
         <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">处理充值单和市场资产审核</h1>
-        <p class="mt-2 max-w-3xl text-sm leading-6 text-muted">
-          这里把管理员日常最重要的两条审核主链放到了一起：充值单审核与市场资产审核。选中后就能在右侧直接操作，不需要来回切页。
-        </p>
       </div>
 
       <UiButton variant="secondary" :disabled="loading" @click="loadReviewCenter">
@@ -153,7 +150,7 @@
 
             <UiTextarea v-model="reviewRemark" label="审核备注" placeholder="例如：已核对到账，允许入账。" :rows="4" />
 
-            <div v-if="reviewError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+            <div v-if="reviewError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600" role="alert">
               {{ reviewError }}
             </div>
 
@@ -208,7 +205,7 @@
 
             <UiTextarea v-model="reviewRemark" label="审核备注" placeholder="例如：结构完整，允许上架。" :rows="4" />
 
-            <div v-if="marketReviewError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+            <div v-if="marketReviewError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600" role="alert">
               {{ marketReviewError }}
             </div>
 
@@ -231,7 +228,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import SectionCard from "@/app/components/SectionCard.vue";
 import UiButton from "@/app/components/ui/UiButton.vue";
 import UiPagination from "@/app/components/ui/UiPagination.vue";
@@ -249,9 +246,10 @@ import {
   rejectAdminMarketAsset,
   rejectAdminRechargeOrder
 } from "@/app/services/admin";
-import { extractApiErrorMessage } from "@/app/services/http";
+import { extractApiErrorMessage, isRequestCanceled } from "@/app/services/http";
 import type { MarketAsset, RechargeOrder } from "@/app/types/admin";
 import type { UserWallet } from "@/app/types/billing";
+import { formatDecimalString, isValidDecimalString, normalizeDecimalString } from "@/app/utils/decimal";
 
 const rechargeOrders = ref<RechargeOrder[]>([]);
 const rechargePage = ref(0);
@@ -271,13 +269,18 @@ const selectedMarketAssetId = ref<number | null>(null);
 const rechargeFilter = ref("PENDING");
 const marketStatusFilter = ref("PENDING");
 const marketTypeFilter = ref("");
-const loading = ref(false);
+const rechargeLoading = ref(false);
+const marketLoading = ref(false);
+const loading = computed(() => rechargeLoading.value || marketLoading.value);
 const reviewSubmitting = ref(false);
 const marketReviewSubmitting = ref(false);
 const adjustingWallet = ref(false);
 const reviewError = ref("");
 const marketReviewError = ref("");
 const reviewRemark = ref("");
+let rechargeLoadController: AbortController | null = null;
+let marketLoadController: AbortController | null = null;
+let walletLoadController: AbortController | null = null;
 
 const walletAdjustForm = reactive({
   amountDelta: "",
@@ -320,8 +323,8 @@ function formatDateTime(value: string | null | undefined) {
   });
 }
 
-function formatMoney(value: string | number | null | undefined) {
-  return Number(value ?? 0).toFixed(2);
+function formatMoney(value: string | null | undefined) {
+  return formatDecimalString(value);
 }
 
 function rechargeStatusLabel(status: string | null | undefined) {
@@ -404,82 +407,113 @@ function walletStatusLabel(status: string | null | undefined) {
 
 async function loadRechargeOrders(newPage?: number) {
   if (newPage !== undefined) rechargePage.value = newPage;
-  loading.value = true;
+  rechargeLoadController?.abort();
+  const controller = new AbortController();
+  rechargeLoadController = controller;
+  const requestedFilter = rechargeFilter.value;
+  const requestedPage = rechargePage.value;
+  rechargeLoading.value = true;
   try {
     const result = await listAdminRechargeOrders(
-      rechargeFilter.value || undefined,
-      rechargePage.value,
-      rechargePageSize
+      requestedFilter || undefined,
+      requestedPage,
+      rechargePageSize,
+      controller.signal
     );
+    if (controller.signal.aborted
+      || requestedFilter !== rechargeFilter.value
+      || requestedPage !== rechargePage.value) return;
     rechargeOrders.value = result.items;
     rechargeTotal.value = result.total;
     rechargeTotalPages.value = result.totalPages;
+    if (selectedRechargeOrderId.value) {
+      selectedRechargeOrder.value = result.items.find(
+        (item) => item.id === selectedRechargeOrderId.value
+      ) ?? null;
+      if (!selectedRechargeOrder.value) {
+        selectedRechargeOrderId.value = null;
+        selectedRechargeWallet.value = null;
+      }
+    }
   } catch (error) {
-    reviewError.value = extractApiErrorMessage(error, "加载充值单失败");
+    if (!isRequestCanceled(error)) {
+      reviewError.value = extractApiErrorMessage(error, "加载充值单失败");
+    }
   } finally {
-    loading.value = false;
+    if (rechargeLoadController === controller) {
+      rechargeLoading.value = false;
+      rechargeLoadController = null;
+    }
   }
 }
 
 async function loadMarketAssets(newPage?: number) {
   if (newPage !== undefined) marketPage.value = newPage;
-  loading.value = true;
+  marketLoadController?.abort();
+  const controller = new AbortController();
+  marketLoadController = controller;
+  const requestedType = marketTypeFilter.value;
+  const requestedStatus = marketStatusFilter.value;
+  const requestedPage = marketPage.value;
+  marketLoading.value = true;
   try {
     const result = await listAdminMarketAssets(
-      marketTypeFilter.value || undefined,
-      marketStatusFilter.value || undefined,
-      marketPage.value,
-      marketPageSize
+      requestedType || undefined,
+      requestedStatus || undefined,
+      requestedPage,
+      marketPageSize,
+      controller.signal
     );
+    if (controller.signal.aborted
+      || requestedType !== marketTypeFilter.value
+      || requestedStatus !== marketStatusFilter.value
+      || requestedPage !== marketPage.value) return;
     marketAssets.value = result.items;
     marketTotal.value = result.total;
     marketTotalPages.value = result.totalPages;
+    if (selectedMarketAssetId.value) {
+      selectedMarketAsset.value = result.items.find(
+        (item) => item.id === selectedMarketAssetId.value
+      ) ?? null;
+      if (!selectedMarketAsset.value) {
+        selectedMarketAssetId.value = null;
+      }
+    }
   } catch (error) {
-    reviewError.value = extractApiErrorMessage(error, "加载市场资产失败");
+    if (!isRequestCanceled(error)) {
+      marketReviewError.value = extractApiErrorMessage(error, "加载市场资产失败");
+    }
   } finally {
-    loading.value = false;
+    if (marketLoadController === controller) {
+      marketLoading.value = false;
+      marketLoadController = null;
+    }
   }
 }
 
 async function loadReviewCenter() {
-  loading.value = true;
-  try {
-    const [orderResult, assetResult] = await Promise.all([
-      listAdminRechargeOrders(rechargeFilter.value || undefined, 0, rechargePageSize),
-      listAdminMarketAssets(marketTypeFilter.value || undefined, marketStatusFilter.value || undefined, 0, marketPageSize)
-    ]);
-    rechargeOrders.value = orderResult.items;
-    rechargeTotal.value = orderResult.total;
-    rechargeTotalPages.value = orderResult.totalPages;
-    marketAssets.value = assetResult.items;
-    marketTotal.value = assetResult.total;
-    marketTotalPages.value = assetResult.totalPages;
-
-    if (selectedRechargeOrderId.value) {
-      const matchedOrder = orderResult.items.find((item) => item.id === selectedRechargeOrderId.value) ?? null;
-      selectedRechargeOrder.value = matchedOrder;
-    }
-
-    if (selectedMarketAssetId.value) {
-      const matchedAsset = assetResult.items.find((item) => item.id === selectedMarketAssetId.value) ?? null;
-      selectedMarketAsset.value = matchedAsset;
-    }
-  } catch (error) {
-    reviewError.value = extractApiErrorMessage(error, "加载审核中心失败");
-  } finally {
-    loading.value = false;
-  }
+  await Promise.all([loadRechargeOrders(0), loadMarketAssets(0)]);
 }
 
 async function selectRechargeOrder(order: RechargeOrder) {
+  walletLoadController?.abort();
+  const controller = new AbortController();
+  walletLoadController = controller;
   selectedRechargeOrderId.value = order.id;
   selectedRechargeOrder.value = order;
   reviewRemark.value = "";
   reviewError.value = "";
   try {
-    selectedRechargeWallet.value = await getAdminUserWallet(order.userId);
+    const wallet = await getAdminUserWallet(order.userId, controller.signal);
+    if (!controller.signal.aborted && selectedRechargeOrderId.value === order.id) {
+      selectedRechargeWallet.value = wallet;
+    }
   } catch (error) {
-    reviewError.value = extractApiErrorMessage(error, "加载用户钱包失败");
+    if (!isRequestCanceled(error)) {
+      reviewError.value = extractApiErrorMessage(error, "加载用户钱包失败");
+    }
+  } finally {
+    if (walletLoadController === controller) walletLoadController = null;
   }
 }
 
@@ -534,9 +568,9 @@ async function adjustWallet() {
     reviewError.value = "请先选择一笔充值单，再对该用户钱包做调账。";
     return;
   }
-  const amountDelta = Number(walletAdjustForm.amountDelta.trim());
-  if (!walletAdjustForm.amountDelta.trim() || Number.isNaN(amountDelta)) {
-    reviewError.value = "请输入合法的调账金额。";
+  const amountDelta = walletAdjustForm.amountDelta.trim();
+  if (!amountDelta || !isValidDecimalString(amountDelta, { allowNegative: true })) {
+    reviewError.value = "请输入最多 12 位整数、6 位小数的合法调账金额。";
     return;
   }
 
@@ -544,7 +578,7 @@ async function adjustWallet() {
   reviewError.value = "";
   try {
     selectedRechargeWallet.value = await adjustAdminUserWallet(selectedRechargeOrder.value.userId, {
-      amountDelta,
+      amountDelta: normalizeDecimalString(amountDelta),
       description: walletAdjustForm.description.trim() || undefined
     });
     walletAdjustForm.amountDelta = "";
@@ -612,15 +646,21 @@ async function offlineMarketAsset() {
 
 watch([rechargeFilter], async () => {
   rechargePage.value = 0;
-  await loadReviewCenter();
+  await loadRechargeOrders();
 });
 
 watch([marketStatusFilter, marketTypeFilter], async () => {
   marketPage.value = 0;
-  await loadReviewCenter();
+  await loadMarketAssets();
 });
 
 onMounted(async () => {
   await loadReviewCenter();
+});
+
+onBeforeUnmount(() => {
+  rechargeLoadController?.abort();
+  marketLoadController?.abort();
+  walletLoadController?.abort();
 });
 </script>

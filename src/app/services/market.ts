@@ -8,22 +8,24 @@ import type {
   SubmitMarketAssetPayload
 } from "@/app/types/market";
 
-export async function listMyMarketSubmissions(page = 0, size = 20) {
+export async function listMyMarketSubmissions(page = 0, size = 20, signal?: AbortSignal) {
   const response = await http.get<ApiResponse<PagedResponse<MarketAsset>>>("/api/market/submissions", {
-    params: { page, size }
+    params: { page, size },
+    signal
   });
   return extractPagedResponseData(response);
 }
 
-export async function listPublishedMarketAssets(assetType?: MarketAssetType, page = 0, size = 20) {
+export async function listPublishedMarketAssets(assetType?: MarketAssetType, page = 0, size = 20, signal?: AbortSignal) {
   const response = await http.get<ApiResponse<PagedResponse<MarketAsset>>>("/api/market/assets", {
-    params: { ...(assetType ? { assetType } : {}), page, size }
+    params: { ...(assetType ? { assetType } : {}), page, size },
+    signal
   });
   return extractPagedResponseData(response);
 }
 
-export async function getMarketAsset(id: number) {
-  const response = await http.get<ApiResponse<MarketAsset>>(`/api/market/assets/${id}`);
+export async function getMarketAsset(id: number, signal?: AbortSignal) {
+  const response = await http.get<ApiResponse<MarketAsset>>(`/api/market/assets/${id}`, { signal });
   return response.data.data;
 }
 

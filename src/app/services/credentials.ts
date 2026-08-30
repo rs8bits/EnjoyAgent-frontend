@@ -6,9 +6,10 @@ import type {
   UpdateCredentialPayload
 } from "@/app/types/credential";
 
-export async function listCredentials(page = 0, size = 20) {
+export async function listCredentials(page = 0, size = 20, signal?: AbortSignal) {
   const response = await http.get<ApiResponse<PagedResponse<Credential>>>("/api/credentials", {
-    params: { page, size }
+    params: { page, size },
+    signal
   });
   return extractPagedResponseData(response);
 }

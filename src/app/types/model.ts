@@ -46,8 +46,8 @@ export interface OfficialModelConfig {
   officialCredentialName: string;
   temperature: string | number | null;
   maxTokens: number | null;
-  inputPricePerMillion: string | number | null;
-  outputPricePerMillion: string | number | null;
+  inputPricePerMillion: string | null;
+  outputPricePerMillion: string | null;
   currency: string | null;
   description: string | null;
   enabled: boolean;

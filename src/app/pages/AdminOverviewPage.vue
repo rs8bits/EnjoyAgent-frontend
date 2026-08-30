@@ -4,9 +4,6 @@
       <div>
         <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">管理后台</div>
         <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">平台运营概览</h1>
-        <p class="mt-2 max-w-3xl text-sm leading-6 text-muted">
-          这一页已经接入真实后台接口，会用当前的官方模型、充值审核和市场审核数据来展示平台状态，而不是静态占位信息。
-        </p>
       </div>
       <UiButton variant="secondary" :disabled="loading" @click="loadOverview">
         {{ loading ? "刷新中..." : "刷新运营概览" }}
@@ -67,14 +64,14 @@
       </SectionCard>
     </div>
 
-    <div v-if="pageError" class="mt-5 rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+    <div v-if="pageError" class="mt-5 rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600" role="alert">
       {{ pageError }}
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import SectionCard from "@/app/components/SectionCard.vue";
 import UiButton from "@/app/components/ui/UiButton.vue";
 import {
@@ -83,8 +80,10 @@ import {
   listAdminOfficialModelCredentials,
   listAdminRechargeOrders
 } from "@/app/services/admin";
-import { extractApiErrorMessage } from "@/app/services/http";
+import { extractApiErrorMessage, isRequestCanceled } from "@/app/services/http";
+import { fetchAllPages } from "@/app/services/pagination";
 import type { MarketAsset, OfficialModelConfig, OfficialModelCredential, RechargeOrder } from "@/app/types/admin";
+import { formatDecimalString } from "@/app/utils/decimal";
 
 const loading = ref(false);
 const pageError = ref("");
@@ -94,6 +93,7 @@ const pendingRechargeOrders = ref<RechargeOrder[]>([]);
 const allRechargeOrders = ref<RechargeOrder[]>([]);
 const pendingMarketAssets = ref<MarketAsset[]>([]);
 const publishedMarketAssets = ref<MarketAsset[]>([]);
+let overviewController: AbortController | null = null;
 
 const stats = computed(() => [
   {
@@ -121,7 +121,7 @@ const stats = computed(() => [
 const queueItems = computed(() => {
   const rechargeItems = pendingRechargeOrders.value.slice(0, 3).map((order) => ({
     title: `充值单 #${order.id}`,
-    subtitle: `${order.userDisplayName || order.userEmail} · ${Number(order.amount).toFixed(2)} ${order.currency}`,
+    subtitle: `${order.userDisplayName || order.userEmail} · ${formatDecimalString(order.amount)} ${order.currency}`,
     tag: "充值"
   }));
 
@@ -173,6 +173,9 @@ const signals = computed(() => {
 });
 
 async function loadOverview() {
+  overviewController?.abort();
+  const controller = new AbortController();
+  overviewController = controller;
   loading.value = true;
   pageError.value = "";
   try {
@@ -184,26 +187,33 @@ async function loadOverview() {
       pendingAssetList,
       publishedAssetList
     ] = await Promise.all([
-      listAdminOfficialModelCredentials(0, 200),
-      listAdminOfficialModelConfigs(0, 200),
-      listAdminRechargeOrders("PENDING", 0, 200),
-      listAdminRechargeOrders(undefined, 0, 200),
-      listAdminMarketAssets(undefined, "PENDING", 0, 200),
-      listAdminMarketAssets(undefined, "APPROVED", 0, 200)
+      fetchAllPages((page, size) => listAdminOfficialModelCredentials(page, size, controller.signal), 100, 2),
+      fetchAllPages((page, size) => listAdminOfficialModelConfigs(page, size, controller.signal), 100, 2),
+      fetchAllPages((page, size) => listAdminRechargeOrders("PENDING", page, size, controller.signal), 100, 2),
+      fetchAllPages((page, size) => listAdminRechargeOrders(undefined, page, size, controller.signal), 100, 2),
+      fetchAllPages((page, size) => listAdminMarketAssets(undefined, "PENDING", page, size, controller.signal), 100, 2),
+      fetchAllPages((page, size) => listAdminMarketAssets(undefined, "APPROVED", page, size, controller.signal), 100, 2)
     ]);
 
-    officialCredentials.value = credentialList.items;
-    officialConfigs.value = configList.items;
-    pendingRechargeOrders.value = pendingRechargeList.items;
-    allRechargeOrders.value = rechargeList.items;
-    pendingMarketAssets.value = pendingAssetList.items;
-    publishedMarketAssets.value = publishedAssetList.items;
+    if (controller.signal.aborted) return;
+    officialCredentials.value = credentialList;
+    officialConfigs.value = configList;
+    pendingRechargeOrders.value = pendingRechargeList;
+    allRechargeOrders.value = rechargeList;
+    pendingMarketAssets.value = pendingAssetList;
+    publishedMarketAssets.value = publishedAssetList;
   } catch (error) {
-    pageError.value = extractApiErrorMessage(error, "加载管理后台概览失败");
+    if (!isRequestCanceled(error)) {
+      pageError.value = extractApiErrorMessage(error, "加载管理后台概览失败");
+    }
   } finally {
-    loading.value = false;
+    if (overviewController === controller) {
+      loading.value = false;
+      overviewController = null;
+    }
   }
 }
 
 onMounted(loadOverview);
+onBeforeUnmount(() => overviewController?.abort());
 </script>

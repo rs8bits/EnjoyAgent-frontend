@@ -2,16 +2,14 @@
   <div class="ea-scroll h-full overflow-y-auto p-5 lg:p-8">
     <div class="mb-6 flex flex-col gap-4 border-b border-line pb-6 lg:flex-row lg:items-end lg:justify-between">
       <div>
-        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">阶段 3 · 官方模型</div>
-        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">查看平台托管模型</h1>
-        <p class="mt-2 max-w-3xl text-sm leading-6 text-muted">
-          这里展示管理员已经上架的官方模型配置。后面创建 Agent 时，如果选择“官方模型”，就会直接使用这里的配置。
-        </p>
+        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">模型</div>
+        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">官方模型</h1>
       </div>
       <div class="flex flex-wrap items-center gap-3">
         <button
           v-for="filter in filters"
           :key="filter.value"
+          type="button"
           class="rounded-full border px-4 py-2 text-sm font-medium transition"
           :class="activeFilter === filter.value ? 'border-accent bg-accent text-white shadow-card' : 'border-line bg-white text-muted hover:border-accent hover:text-accent'"
           @click="activeFilter = filter.value"
@@ -21,12 +19,16 @@
       </div>
     </div>
 
+    <div v-if="submitError" class="mb-5 rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600" role="alert">
+      {{ submitError }}
+    </div>
+
     <div v-if="loading" class="rounded-[24px] border border-line bg-white px-4 py-12 text-sm text-muted shadow-card">
       正在加载官方模型...
     </div>
 
     <div v-else-if="!filteredModels.length" class="rounded-[24px] border border-dashed border-line bg-white px-4 py-12 text-center text-sm text-muted shadow-card">
-      当前还没有可用的官方模型配置。后端接口已经接通，等管理员在后台配置后这里会直接显示。
+      暂无可用的官方模型。
     </div>
 
     <div v-else class="grid gap-5 xl:grid-cols-2">
@@ -77,11 +79,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { onBeforeUnmount, onMounted, ref, watch } from "vue";
 import SectionCard from "@/app/components/SectionCard.vue";
 import UiPagination from "@/app/components/ui/UiPagination.vue";
 import { credentialProviderOptions, modelTypeOptions } from "@/app/constants/options";
-import { extractApiErrorMessage } from "@/app/services/http";
+import { extractApiErrorMessage, isRequestCanceled } from "@/app/services/http";
 import { listOfficialModelConfigs } from "@/app/services/models";
 import type { OfficialModelConfig } from "@/app/types/model";
 
@@ -93,6 +95,7 @@ const totalPages = ref(0);
 const loading = ref(false);
 const submitError = ref("");
 const activeFilter = ref("ALL");
+let loadController: AbortController | null = null;
 
 const filters = [
   { label: "全部", value: "ALL" },
@@ -101,12 +104,7 @@ const filters = [
   { label: "Rerank", value: "RERANK" }
 ];
 
-const filteredModels = computed(() => {
-  if (activeFilter.value === "ALL") {
-    return officialModels.value;
-  }
-  return officialModels.value.filter((item) => item.modelType === activeFilter.value);
-});
+const filteredModels = officialModels;
 
 function providerLabel(provider: string) {
   return credentialProviderOptions.find((option) => option.value === provider)?.label ?? provider;
@@ -116,7 +114,7 @@ function modelTypeLabel(modelType: string) {
   return modelTypeOptions.find((option) => option.value === modelType)?.label ?? modelType;
 }
 
-function priceText(price: string | number | null, currency: string | null) {
+function priceText(price: string | null, currency: string | null) {
   if (price === null || price === undefined) {
     return "未设置";
   }
@@ -125,35 +123,51 @@ function priceText(price: string | number | null, currency: string | null) {
 
 async function loadOfficialModels(newPage?: number) {
   if (newPage !== undefined) page.value = newPage;
+  loadController?.abort();
+  const controller = new AbortController();
+  loadController = controller;
+  const requestedPage = page.value;
+  const requestedFilter = activeFilter.value;
   loading.value = true;
+  submitError.value = "";
   try {
-    const result = await listOfficialModelConfigs(page.value, pageSize);
+    const result = await listOfficialModelConfigs(
+      requestedPage,
+      pageSize,
+      controller.signal,
+      requestedFilter === "ALL" ? undefined : requestedFilter
+    );
+    if (controller.signal.aborted
+      || requestedPage !== page.value
+      || requestedFilter !== activeFilter.value) return;
     officialModels.value = result.items;
     total.value = result.total;
     totalPages.value = result.totalPages;
   } catch (error) {
-    submitError.value = extractApiErrorMessage(error, "加载官方模型失败");
+    if (!isRequestCanceled(error)) {
+      submitError.value = extractApiErrorMessage(error, "加载官方模型失败");
+    }
   } finally {
-    loading.value = false;
+    if (loadController === controller) {
+      loading.value = false;
+      loadController = null;
+    }
   }
 }
 
 async function loadAll() {
   page.value = 0;
-  loading.value = true;
-  try {
-    const result = await listOfficialModelConfigs(0, pageSize);
-    officialModels.value = result.items;
-    total.value = result.total;
-    totalPages.value = result.totalPages;
-  } catch (error) {
-    submitError.value = extractApiErrorMessage(error, "加载官方模型失败");
-  } finally {
-    loading.value = false;
-  }
+  await loadOfficialModels();
 }
+
+watch(activeFilter, async () => {
+  page.value = 0;
+  await loadOfficialModels();
+});
 
 onMounted(async () => {
   await loadAll();
 });
+
+onBeforeUnmount(() => loadController?.abort());
 </script>

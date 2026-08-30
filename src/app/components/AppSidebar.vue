@@ -42,22 +42,30 @@ const route = useRoute();
 const authStore = useAuthStore();
 
 const sections = computed(() => {
+  const ownerWorkspaceItems = authStore.isOwner
+    ? [
+        { label: "Agent 管理", to: "/app/agents", icon: Bot },
+        { label: "知识库管理", to: "/app/knowledge", icon: Database },
+        { label: "MCP 工具", to: "/app/mcp", icon: Wrench },
+        { label: "工作流", to: "/app/workflows", icon: Workflow }
+      ]
+    : [];
+  const ownerResourceItems = authStore.isOwner
+    ? [{ label: "模型配置", to: "/app/model-configs", icon: ToyBrick }]
+    : [];
   const base = [
     {
       title: "开始使用",
       items: [
         { label: "工作台首页", to: "/app/home", icon: Sparkles },
-        { label: "Agent 管理", to: "/app/agents", icon: Bot },
-        { label: "知识库管理", to: "/app/knowledge", icon: Database },
-        { label: "MCP 工具", to: "/app/mcp", icon: Wrench },
-        { label: "工作流", to: "/app/workflows", icon: Workflow }
+        ...ownerWorkspaceItems
       ]
     },
     {
       title: "资源配置",
       items: [
         { label: "凭证管理", to: "/app/credentials", icon: KeyRound },
-        { label: "模型配置", to: "/app/model-configs", icon: ToyBrick },
+        ...ownerResourceItems,
         { label: "官方模型", to: "/app/official-models", icon: Waypoints }
       ]
     },

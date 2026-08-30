@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { useRouter } from "vue-router";
-import { Edit3, Plus, Trash2, Workflow } from "lucide-vue-next";
+import { Edit3, Trash2, Workflow } from "lucide-vue-next";
 import SectionCard from "@/app/components/SectionCard.vue";
 import UiButton from "@/app/components/ui/UiButton.vue";
 import UiPagination from "@/app/components/ui/UiPagination.vue";
@@ -13,7 +13,7 @@ import {
   updateWorkflow,
 } from "@/app/services/workflow";
 import type { Workflow as WorkflowType } from "@/app/types/workflow";
-import { extractApiErrorMessage } from "@/app/services/http";
+import { extractApiErrorMessage, isRequestCanceled } from "@/app/services/http";
 
 const router = useRouter();
 
@@ -25,6 +25,7 @@ const total = ref(0);
 const totalPages = ref(0);
 const selectedId = ref<number | null>(null);
 const submitError = ref("");
+let loadController: AbortController | null = null;
 
 const form = reactive({
   name: "",
@@ -40,16 +41,26 @@ onMounted(async () => {
 });
 
 async function loadAll() {
+  loadController?.abort();
+  const controller = new AbortController();
+  loadController = controller;
+  const requestedPage = page.value;
   loading.value = true;
   try {
-    const result = await listWorkflows(page.value);
+    const result = await listWorkflows(requestedPage, 20, controller.signal);
+    if (controller.signal.aborted || requestedPage !== page.value) return;
     workflows.value = result.items;
     total.value = result.total;
     totalPages.value = result.totalPages;
   } catch (error) {
-    submitError.value = extractApiErrorMessage(error, "加载工作流列表失败");
+    if (!isRequestCanceled(error)) {
+      submitError.value = extractApiErrorMessage(error, "加载工作流列表失败");
+    }
   } finally {
-    loading.value = false;
+    if (loadController === controller) {
+      loading.value = false;
+      loadController = null;
+    }
   }
 }
 
@@ -103,6 +114,10 @@ async function removeWorkflow(id: number) {
     await deleteWorkflow(id);
     if (selectedId.value === id) startCreate();
     await loadAll();
+    if (!workflows.value.length && page.value > 0) {
+      page.value -= 1;
+      await loadAll();
+    }
   } catch (error) {
     submitError.value = extractApiErrorMessage(error, "删除失败");
   }
@@ -116,6 +131,8 @@ async function onPageChange(newPage: number) {
 function openCanvas(workflowId: number) {
   router.push(`/app/workflows/${workflowId}/canvas`);
 }
+
+onBeforeUnmount(() => loadController?.abort());
 </script>
 
 <template>
@@ -124,9 +141,6 @@ function openCanvas(workflowId: number) {
       <div>
         <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">自动化</div>
         <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">工作流</h1>
-        <p class="mt-2 max-w-3xl text-sm leading-6 text-muted">
-          创建和管理可视化工作流，为 Agent 编排可拖拽的执行逻辑。
-        </p>
       </div>
       <div class="flex items-center gap-3">
         <span class="text-sm text-muted">
@@ -148,17 +162,17 @@ function openCanvas(workflowId: number) {
             class="flex items-center justify-between rounded-[14px] border px-4 py-3"
             :class="selectedId === wf.id ? 'border-accent bg-accent-soft/30' : 'border-line bg-white'"
           >
-            <div class="min-w-0 flex-1 cursor-pointer" @click="selectWorkflow(wf)">
+            <button type="button" class="min-w-0 flex-1 text-left" @click="selectWorkflow(wf)">
               <div class="flex items-center gap-2">
                 <Workflow class="h-4 w-4 shrink-0 text-accent" />
                 <span class="text-sm font-medium text-ink truncate">{{ wf.name }}</span>
                 <span class="shrink-0 text-xs text-muted">{{ wf.nodeCount }} 节点</span>
               </div>
               <div v-if="wf.description" class="mt-1 text-xs text-muted truncate">{{ wf.description }}</div>
-            </div>
+            </button>
             <div class="ml-3 flex shrink-0 items-center gap-1">
               <UiButton variant="ghost" @click="openCanvas(wf.id)">画布</UiButton>
-              <UiButton variant="ghost" @click="removeWorkflow(wf.id)">
+              <UiButton variant="ghost" :aria-label="`删除工作流 ${wf.name}`" @click="removeWorkflow(wf.id)">
                 <Trash2 class="h-4 w-4" />
               </UiButton>
             </div>
@@ -177,7 +191,6 @@ function openCanvas(workflowId: number) {
       <SectionCard
         :eyebrow="selectedId ? '编辑工作流' : '新建工作流'"
         :title="selectedId ? '编辑元数据' : '创建新工作流'"
-        description="设置名称和描述后点击保存。"
       >
         <form class="space-y-4" @submit.prevent="submit">
           <UiTextField
@@ -191,7 +204,7 @@ function openCanvas(workflowId: number) {
             label="描述（可选）"
             placeholder="简要描述工作流的用途"
           />
-          <div v-if="submitError && form.name.trim()" class="text-sm text-rose-500">
+          <div v-if="submitError && form.name.trim()" class="text-sm text-rose-500" role="alert">
             {{ submitError }}
           </div>
           <div class="flex gap-2">

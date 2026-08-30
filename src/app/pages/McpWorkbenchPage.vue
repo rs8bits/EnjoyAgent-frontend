@@ -2,11 +2,8 @@
   <div class="ea-scroll flex h-full min-h-0 flex-col overflow-y-auto p-5 lg:p-6">
     <div class="mb-5 flex flex-col gap-5 border-b border-line pb-5 lg:flex-row lg:items-end lg:justify-between">
       <div>
-        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">阶段 6 · MCP 模块</div>
-        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">把工具能力真正接到 Agent</h1>
-        <p class="mt-2 max-w-3xl text-sm leading-6 text-muted">
-          这里已经接上真实的 MCP Server、工具目录、Agent 工具绑定、OAuth 状态和调用日志。你可以先配置 Server，再把工具绑定到某个 Agent。
-        </p>
+        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">MCP</div>
+        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">MCP 工具管理</h1>
       </div>
 
       <div class="flex flex-wrap items-center gap-3 rounded-full border border-line bg-white px-4 py-3 shadow-card">
@@ -152,13 +149,13 @@
               hint="停用后当前 Server 不会参与 Agent 工具调用。"
             />
 
-            <div v-if="serverError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+            <div v-if="serverError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600" role="alert">
               {{ serverError }}
             </div>
 
             <div class="flex flex-wrap items-center gap-3">
               <UiButton type="submit" :disabled="savingServer">
-                {{ savingServer ? "保存中..." : selectedServerId ? "保存 Server" : "创建 Server" }}
+                {{ savingServer ? "保存中..." : selectedServerId ? "保存 Server" : canAutoSyncServerForm ? "创建并同步 Server" : "创建 Server" }}
               </UiButton>
               <UiButton variant="secondary" :disabled="savingServer" @click="startCreateServer">
                 新建空白表单
@@ -197,15 +194,20 @@
                 </UiButton>
               </div>
 
-              <div v-if="toolError" class="mb-4 rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+              <div v-if="toolError" class="mb-4 rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600" role="alert">
                 {{ toolError }}
+              </div>
+
+              <div v-if="toolHint" class="mb-4 rounded-[18px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700" role="status">
+                {{ toolHint }}
               </div>
 
               <div
                 v-if="!tools.length"
                 class="rounded-[20px] border border-dashed border-line bg-canvas px-4 py-10 text-center text-sm leading-6 text-muted"
               >
-                当前工具目录还是空的。你可以先尝试同步远端工具，或者在右侧手动输入工具快照。
+                当前工具目录还是空的。创建 Server 只是保存连接配置，只有成功执行 tools/list 后才会产生可绑定的工具。
+                你可以点击“从远端同步”重试，或者在右侧手动输入工具快照。
               </div>
 
               <div v-else class="ea-scroll min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
@@ -237,7 +239,7 @@
                 :size="toolPageSize"
                 :total="toolTotal"
                 :total-pages="toolTotalPages"
-                @change="loadToolsForSelectedServer"
+                @change="changeToolPage"
               />
             </div>
 
@@ -258,30 +260,65 @@
                 </UiButton>
               </div>
             </div>
+
+            <div v-if="hasBoundHighRiskTools" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-700">
+              HIGH 风险工具不会被静默调用。用户需要在聊天工作台为下一条消息签发短期、Agent/工具绑定的授权。
+              <RouterLink
+                class="ml-1 font-semibold underline"
+                :to="{ path: '/app/chat/workspace', query: { agentId: selectedAgentId } }"
+              >
+                前往逐次授权
+              </RouterLink>
+            </div>
           </div>
         </SectionCard>
       </div>
 
       <div class="ea-scroll min-h-0 space-y-5 overflow-y-auto pr-1">
         <SectionCard eyebrow="Agent 绑定" title="把工具绑定到 Agent">
-          <div v-if="!agents.length" class="rounded-[18px] border border-dashed border-line bg-canvas px-4 py-8 text-sm leading-6 text-muted">
+          <div v-if="!hasAnyAgent" class="rounded-[18px] border border-dashed border-line bg-canvas px-4 py-8 text-sm leading-6 text-muted">
             当前还没有 Agent，请先去 Agent 管理页面创建一个 Agent。
           </div>
 
           <div v-else class="space-y-4">
+            <form class="space-y-2" @submit.prevent="submitAgentSearch">
+              <UiTextField
+                v-model="agentSearchInput"
+                label="搜索 Agent"
+                placeholder="输入 Agent 名称"
+                hint="按名称服务端搜索，每次只加载一页。"
+              />
+              <UiButton class="w-full" type="submit" variant="secondary" :disabled="agentsLoading">
+                {{ agentsLoading ? "搜索中..." : "搜索" }}
+              </UiButton>
+            </form>
+
             <UiSelect
               v-model="selectedAgentId"
               label="当前 Agent"
               :options="agentOptions"
               placeholder="请选择一个 Agent"
+              :disabled="agentsLoading"
+              :hint="agentSelectorHint"
+            />
+
+            <UiPagination
+              :page="agentPage"
+              :size="agentPageSize"
+              :total="agentTotal"
+              :total-pages="agentTotalPages"
+              @change="changeAgentPage"
             />
 
             <div v-if="!selectedServer" class="rounded-[18px] border border-dashed border-line bg-canvas px-4 py-6 text-sm text-muted">
               先在左侧选择一个 MCP Server，这里会出现它的工具绑定清单。
             </div>
 
-            <div v-else-if="!tools.length" class="rounded-[18px] border border-dashed border-line bg-canvas px-4 py-6 text-sm text-muted">
-              当前 Server 还没有工具目录，先同步或手动保存工具快照，再绑定到 Agent。
+            <div v-else-if="!tools.length" class="space-y-3 rounded-[18px] border border-dashed border-line bg-canvas px-4 py-6 text-sm text-muted">
+              <p>当前 Server 还没有工具目录。先从远端发现工具，再绑定到 Agent。</p>
+              <UiButton :disabled="syncingTools" @click="syncSelectedServerTools">
+                {{ syncingTools ? "同步中..." : "同步工具并继续绑定" }}
+              </UiButton>
             </div>
 
             <div v-else class="space-y-3">
@@ -305,7 +342,7 @@
               </label>
             </div>
 
-            <div v-if="bindingError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+            <div v-if="bindingError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600" role="alert">
               {{ bindingError }}
             </div>
 
@@ -335,7 +372,7 @@
               :size="bindingPageSize"
               :total="bindingTotal"
               :total-pages="bindingTotalPages"
-              @change="loadBindingsForSelectedAgent"
+              @change="changeBindingPage"
             />
           </div>
         </SectionCard>
@@ -381,7 +418,7 @@
 
             <div v-if="selectedServer.authType === 'OAUTH_AUTH_CODE'" class="space-y-4">
               <UiTextField v-model="oauthForm.clientId" label="OAuth Client ID" placeholder="请输入 client_id" />
-              <UiTextField v-model="oauthForm.clientSecret" label="OAuth Client Secret" placeholder="Public Client 可留空" />
+              <UiTextField v-model="oauthForm.clientSecret" type="password" autocomplete="new-password" label="OAuth Client Secret" placeholder="Public Client 可留空" />
               <UiTextField v-model="oauthForm.scope" label="请求 Scope" placeholder="openid profile mcp" />
               <UiButton :disabled="oauthSubmitting || !oauthForm.clientId.trim()" @click="startAuthorization">
                 {{ oauthSubmitting ? "生成中..." : "发起授权并打开新窗口" }}
@@ -390,7 +427,7 @@
 
             <div v-else class="space-y-4">
               <UiTextField v-model="oauthForm.clientId" label="OAuth Client ID" placeholder="请输入 client_id" />
-              <UiTextField v-model="oauthForm.clientSecret" label="OAuth Client Secret" placeholder="请输入 client_secret" />
+              <UiTextField v-model="oauthForm.clientSecret" type="password" autocomplete="new-password" label="OAuth Client Secret" placeholder="请输入 client_secret" />
               <UiTextField v-model="oauthForm.scope" label="请求 Scope" placeholder="openid profile mcp" />
               <UiButton :disabled="oauthSubmitting || !oauthForm.clientId.trim() || !oauthForm.clientSecret.trim()" @click="connectClientCredentials">
                 {{ oauthSubmitting ? "连接中..." : "建立 Client Credentials 连接" }}
@@ -410,7 +447,7 @@
               {{ oauthHint }}
             </div>
 
-            <div v-if="oauthError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+            <div v-if="oauthError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600" role="alert">
               {{ oauthError }}
             </div>
           </div>
@@ -458,7 +495,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import SectionCard from "@/app/components/SectionCard.vue";
 import UiButton from "@/app/components/ui/UiButton.vue";
@@ -467,10 +504,11 @@ import UiPagination from "@/app/components/ui/UiPagination.vue";
 import UiSelect from "@/app/components/ui/UiSelect.vue";
 import UiTextField from "@/app/components/ui/UiTextField.vue";
 import UiTextarea from "@/app/components/ui/UiTextarea.vue";
+import { usePaginatedAgentSelector } from "@/app/composables/usePaginatedAgentSelector";
 import { mcpAuthOptions, mcpToolRiskOptions, mcpTransportOptions } from "@/app/constants/options";
-import { listAgents } from "@/app/services/agents";
 import { listCredentials } from "@/app/services/credentials";
-import { extractApiErrorMessage } from "@/app/services/http";
+import { extractApiErrorMessage, isRequestCanceled } from "@/app/services/http";
+import { fetchAllPages } from "@/app/services/pagination";
 import {
   connectMcpOAuthClientCredentials,
   createMcpServer,
@@ -487,9 +525,9 @@ import {
   syncMcpServerTools,
   updateMcpServer
 } from "@/app/services/mcp";
-import type { Agent } from "@/app/types/agent";
 import type { Credential } from "@/app/types/credential";
 import type {
+  AgentToolBinding,
   McpOAuthConnection,
   McpServer,
   McpTool,
@@ -502,16 +540,17 @@ const route = useRoute();
 const router = useRouter();
 
 const servers = ref<McpServer[]>([]);
+const allServers = ref<McpServer[]>([]);
 const serverPage = ref(0);
 const serverPageSize = 20;
 const serverTotal = ref(0);
 const serverTotalPages = ref(0);
 const tools = ref<McpTool[]>([]);
+const allServerTools = ref<McpTool[]>([]);
 const toolPage = ref(0);
 const toolPageSize = 20;
 const toolTotal = ref(0);
 const toolTotalPages = ref(0);
-const agents = ref<Agent[]>([]);
 const credentials = ref<Credential[]>([]);
 const bindings = ref<Array<{
   id: number;
@@ -519,6 +558,7 @@ const bindings = ref<Array<{
   toolName: string;
   serverName: string;
 }>>([]);
+const allAgentBindings = ref<AgentToolBinding[]>([]);
 const bindingPage = ref(0);
 const bindingPageSize = 20;
 const bindingTotal = ref(0);
@@ -538,9 +578,25 @@ const logsLoading = ref(false);
 
 const selectedServerId = ref<number | null>(null);
 const selectedAgentId = ref<string>("");
+const {
+  agentOptions,
+  agentPage,
+  pageSize: agentPageSize,
+  agentTotal,
+  agentTotalPages,
+  agentSearchInput,
+  appliedAgentSearch,
+  agentsLoading,
+  hasAnyAgent,
+  initializeAgents,
+  loadAgentPage,
+  searchAgents,
+  disposeAgentSelector
+} = usePaginatedAgentSelector(selectedAgentId);
 
 const serverError = ref("");
 const toolError = ref("");
+const toolHint = ref("");
 const bindingError = ref("");
 const oauthError = ref("");
 const oauthHint = ref("");
@@ -567,16 +623,21 @@ const oauthForm = reactive({
   clientSecret: "",
   scope: "openid profile mcp"
 });
+let toolsLoadController: AbortController | null = null;
+let bindingsLoadController: AbortController | null = null;
+let oauthLoadController: AbortController | null = null;
+let logsLoadController: AbortController | null = null;
+let baseLoadController: AbortController | null = null;
+let componentActive = false;
+let initializingWorkbench = true;
 
 const selectedServer = computed(() =>
   servers.value.find((item) => item.id === selectedServerId.value) ?? null
 );
 
-const agentOptions = computed(() =>
-  agents.value.map((agent) => ({
-    label: agent.name,
-    value: String(agent.id)
-  }))
+const agentSelectorHint = computed(() => appliedAgentSearch.value
+  ? `搜索“${appliedAgentSearch.value}”共 ${agentTotal.value} 条；已选 Agent 会在切页后保留。`
+  : `共 ${agentTotal.value} 个 Agent，每页 ${agentPageSize} 个。`
 );
 
 const credentialOptions = computed(() =>
@@ -586,6 +647,19 @@ const credentialOptions = computed(() =>
       label: `${credential.name} · ${credential.provider}`,
       value: String(credential.id)
     }))
+);
+
+const canAutoSyncServerForm = computed(() =>
+  serverForm.enabled
+  && serverForm.transportType === "STREAMABLE_HTTP"
+  && (serverForm.authType === "NONE"
+    || (serverForm.authType === "STATIC_BEARER" && Boolean(serverForm.credentialId)))
+);
+
+const hasBoundHighRiskTools = computed(() =>
+  allAgentBindings.value.some((binding) =>
+    binding.enabled && binding.riskLevel === "HIGH" && boundToolIds.value.includes(binding.toolId)
+  )
 );
 
 const transportOptions = [...mcpTransportOptions];
@@ -669,9 +743,11 @@ function startCreateServer() {
   resetServerForm();
   resetServerErrors();
   toolError.value = "";
+  toolHint.value = "";
   oauthError.value = "";
   oauthHint.value = "";
   tools.value = [];
+  allServerTools.value = [];
   toolsEditorJson.value = "[]";
   oauthConnection.value = null;
 }
@@ -691,6 +767,8 @@ function syncServerForm(server: McpServer | null) {
 }
 
 function selectServer(server: McpServer) {
+  toolError.value = "";
+  toolHint.value = "";
   selectedServerId.value = server.id;
   syncServerForm(server);
   resetServerErrors();
@@ -737,64 +815,92 @@ function parseToolsEditor() {
   });
 }
 
-async function loadServers(newPage?: number) {
-  if (newPage !== undefined) serverPage.value = newPage;
-  baseLoading.value = true;
-  serverError.value = "";
-  try {
-    const result = await listMcpServers(serverPage.value, serverPageSize);
-    servers.value = result.items;
-    serverTotal.value = result.total;
-    serverTotalPages.value = result.totalPages;
-  } catch (error) {
-    serverError.value = extractApiErrorMessage(error, "加载 MCP Server 失败");
-  } finally {
-    baseLoading.value = false;
+function showServerPage(page: number) {
+  const lastPage = Math.max(0, serverTotalPages.value - 1);
+  serverPage.value = Math.min(Math.max(0, page), lastPage);
+  servers.value = allServers.value.slice(
+    serverPage.value * serverPageSize,
+    (serverPage.value + 1) * serverPageSize
+  );
+}
+
+function revealServer(serverId: number) {
+  const index = allServers.value.findIndex((server) => server.id === serverId);
+  if (index >= 0) {
+    showServerPage(Math.floor(index / serverPageSize));
   }
 }
 
+function loadServers(page: number) {
+  showServerPage(page);
+  if (selectedServerId.value && servers.value.some((server) => server.id === selectedServerId.value)) {
+    return;
+  }
+  selectedServerId.value = servers.value[0]?.id ?? null;
+}
+
 async function loadBaseResources() {
+  baseLoadController?.abort();
+  const controller = new AbortController();
+  baseLoadController = controller;
   baseLoading.value = true;
   serverError.value = "";
   try {
-    const [serverResult, credentialResult, agentResult] = await Promise.all([
-      listMcpServers(0, serverPageSize),
-      listCredentials(0, 999),
-      listAgents(0, 999)
+    const routeAgentId = parseRouteId("agentId");
+    const [loadedServers, allCredentials] = await Promise.all([
+      fetchAllPages((page, size) => listMcpServers(page, size, controller.signal)),
+      fetchAllPages((page, size) => listCredentials(page, size, controller.signal)),
+      initializeAgents(routeAgentId ?? undefined, controller.signal)
     ]);
-    servers.value = serverResult.items;
-    serverTotal.value = serverResult.total;
-    serverTotalPages.value = serverResult.totalPages;
-    credentials.value = credentialResult.items;
-    agents.value = agentResult.items;
-
-    const loadedServers = serverResult.items;
-    const loadedAgents = agentResult.items;
+    if (controller.signal.aborted) return;
+    allServers.value = loadedServers;
+    serverTotal.value = loadedServers.length;
+    serverTotalPages.value = loadedServers.length ? Math.ceil(loadedServers.length / serverPageSize) : 0;
+    credentials.value = allCredentials;
 
     const routeServerId = parseRouteId("serverId");
-    const routeAgentId = parseRouteId("agentId");
 
-    if (routeAgentId && loadedAgents.some((agent) => agent.id === routeAgentId)) {
-      selectedAgentId.value = String(routeAgentId);
-    } else if (selectedAgentId.value && !loadedAgents.some((agent) => String(agent.id) === selectedAgentId.value)) {
-      selectedAgentId.value = loadedAgents.length ? String(loadedAgents[0].id) : "";
-    } else if (!selectedAgentId.value && loadedAgents.length) {
-      selectedAgentId.value = String(loadedAgents[0].id);
-    }
-
-    if (routeServerId && loadedServers.some((server) => server.id === routeServerId)) {
-      selectedServerId.value = routeServerId;
-    } else if (selectedServerId.value && !loadedServers.some((server) => server.id === selectedServerId.value)) {
-      selectedServerId.value = loadedServers.length ? loadedServers[0].id : null;
-    } else if (!selectedServerId.value && loadedServers.length) {
-      selectedServerId.value = loadedServers[0].id;
-    }
+    const activeServerId = routeServerId && loadedServers.some((server) => server.id === routeServerId)
+      ? routeServerId
+      : selectedServerId.value && loadedServers.some((server) => server.id === selectedServerId.value)
+        ? selectedServerId.value
+        : loadedServers[0]?.id ?? null;
+    if (activeServerId) revealServer(activeServerId);
+    else showServerPage(0);
+    selectedServerId.value = activeServerId;
 
     syncServerForm(selectedServer.value);
   } catch (error) {
-    serverError.value = extractApiErrorMessage(error, "加载 MCP 资源失败");
+    if (!isRequestCanceled(error)) {
+      serverError.value = extractApiErrorMessage(error, "加载 MCP 资源失败");
+    }
   } finally {
-    baseLoading.value = false;
+    if (baseLoadController === controller) {
+      baseLoading.value = false;
+      baseLoadController = null;
+    }
+  }
+}
+
+async function submitAgentSearch() {
+  bindingError.value = "";
+  try {
+    await searchAgents();
+  } catch (error) {
+    if (!isRequestCanceled(error)) {
+      bindingError.value = extractApiErrorMessage(error, "搜索 Agent 失败");
+    }
+  }
+}
+
+async function changeAgentPage(page: number) {
+  bindingError.value = "";
+  try {
+    await loadAgentPage(page);
+  } catch (error) {
+    if (!isRequestCanceled(error)) {
+      bindingError.value = extractApiErrorMessage(error, "加载 Agent 分页失败");
+    }
   }
 }
 
@@ -802,41 +908,89 @@ async function loadToolsForSelectedServer(newPage?: number) {
   if (newPage !== undefined) toolPage.value = newPage;
   if (!selectedServerId.value) {
     tools.value = [];
+    allServerTools.value = [];
+    toolTotal.value = 0;
+    toolTotalPages.value = 0;
     toolsEditorJson.value = "[]";
     return;
   }
+  toolsLoadController?.abort();
+  const controller = new AbortController();
+  toolsLoadController = controller;
+  const requestedServerId = selectedServerId.value;
+  const requestedPage = toolPage.value;
   try {
-    const result = await listMcpTools(selectedServerId.value, toolPage.value, toolPageSize);
-    tools.value = result.items;
-    toolTotal.value = result.total;
-    toolTotalPages.value = result.totalPages;
-    serializeToolsToEditor(tools.value);
+    const allTools = await fetchAllPages((page, size) =>
+      listMcpTools(requestedServerId, page, size, controller.signal)
+    );
+    if (controller.signal.aborted || requestedServerId !== selectedServerId.value || requestedPage !== toolPage.value) return;
+    const totalPages = allTools.length ? Math.ceil(allTools.length / toolPageSize) : 0;
+    const visiblePage = totalPages > 0 ? Math.min(requestedPage, totalPages - 1) : 0;
+    toolPage.value = visiblePage;
+    allServerTools.value = allTools;
+    tools.value = allTools.slice(visiblePage * toolPageSize, (visiblePage + 1) * toolPageSize);
+    toolTotal.value = allTools.length;
+    toolTotalPages.value = totalPages;
+    serializeToolsToEditor(allTools);
   } catch (error) {
-    toolError.value = extractApiErrorMessage(error, "加载工具目录失败");
+    if (!isRequestCanceled(error)) {
+      toolError.value = extractApiErrorMessage(error, "加载工具目录失败");
+    }
+  } finally {
+    if (toolsLoadController === controller) toolsLoadController = null;
   }
+}
+
+function changeToolPage(page: number) {
+  toolPage.value = page;
+  tools.value = allServerTools.value.slice(page * toolPageSize, (page + 1) * toolPageSize);
 }
 
 async function loadBindingsForSelectedAgent(newPage?: number) {
   if (newPage !== undefined) bindingPage.value = newPage;
   if (!selectedAgentId.value) {
     bindings.value = [];
+    allAgentBindings.value = [];
     boundToolIds.value = [];
     return;
   }
+  bindingsLoadController?.abort();
+  const controller = new AbortController();
+  bindingsLoadController = controller;
+  const requestedAgentId = selectedAgentId.value;
+  const requestedPage = bindingPage.value;
   try {
-    const result = await listAgentToolBindings(Number(selectedAgentId.value), bindingPage.value, bindingPageSize);
-    bindings.value = result.items.map((item) => ({
+    const allBindings = await fetchAllPages((page, size) =>
+      listAgentToolBindings(Number(requestedAgentId), page, size, controller.signal)
+    );
+    if (controller.signal.aborted || requestedAgentId !== selectedAgentId.value || requestedPage !== bindingPage.value) return;
+    const totalPages = allBindings.length ? Math.ceil(allBindings.length / bindingPageSize) : 0;
+    const visiblePage = totalPages > 0 ? Math.min(requestedPage, totalPages - 1) : 0;
+    bindingPage.value = visiblePage;
+    allAgentBindings.value = allBindings;
+    changeBindingPage(visiblePage);
+    bindingTotal.value = allBindings.length;
+    bindingTotalPages.value = totalPages;
+    boundToolIds.value = allBindings.map((item) => item.toolId);
+  } catch (error) {
+    if (!isRequestCanceled(error)) {
+      bindingError.value = extractApiErrorMessage(error, "加载 Agent 工具绑定失败");
+    }
+  } finally {
+    if (bindingsLoadController === controller) bindingsLoadController = null;
+  }
+}
+
+function changeBindingPage(page: number) {
+  bindingPage.value = page;
+  bindings.value = allAgentBindings.value
+    .slice(page * bindingPageSize, (page + 1) * bindingPageSize)
+    .map((item) => ({
       id: item.id,
       toolId: item.toolId,
       toolName: item.toolName,
       serverName: item.serverName
     }));
-    bindingTotal.value = result.total;
-    bindingTotalPages.value = result.totalPages;
-    boundToolIds.value = result.items.map((item) => item.toolId);
-  } catch (error) {
-    bindingError.value = extractApiErrorMessage(error, "加载 Agent 工具绑定失败");
-  }
 }
 
 async function loadOAuthConnectionForSelectedServer() {
@@ -849,24 +1003,45 @@ async function loadOAuthConnectionForSelectedServer() {
   if (selectedServer.value.authType !== "OAUTH_AUTH_CODE" && selectedServer.value.authType !== "OAUTH_CLIENT_CREDENTIALS") {
     return;
   }
+  oauthLoadController?.abort();
+  const controller = new AbortController();
+  oauthLoadController = controller;
+  const requestedServerId = selectedServer.value.id;
   try {
-    oauthConnection.value = await getMcpOAuthConnection(selectedServer.value.id);
+    const connection = await getMcpOAuthConnection(requestedServerId, controller.signal);
+    if (controller.signal.aborted || requestedServerId !== selectedServerId.value) return;
+    oauthConnection.value = connection;
   } catch (error) {
-    oauthError.value = extractApiErrorMessage(error, "加载 OAuth 连接状态失败");
+    if (!isRequestCanceled(error)) {
+      oauthError.value = extractApiErrorMessage(error, "加载 OAuth 连接状态失败");
+    }
+  } finally {
+    if (oauthLoadController === controller) oauthLoadController = null;
   }
 }
 
 async function loadToolCallLogsForSelectedAgent() {
+  logsLoadController?.abort();
+  const controller = new AbortController();
+  logsLoadController = controller;
+  const requestedAgentId = selectedAgentId.value;
   logsLoading.value = true;
   try {
-    toolCallLogs.value = await listMcpToolCallLogs({
-      agentId: selectedAgentId.value ? Number(selectedAgentId.value) : undefined,
+    const logs = await listMcpToolCallLogs({
+      agentId: requestedAgentId ? Number(requestedAgentId) : undefined,
       limit: 8
-    });
+    }, controller.signal);
+    if (controller.signal.aborted || requestedAgentId !== selectedAgentId.value) return;
+    toolCallLogs.value = logs;
   } catch (error) {
-    bindingError.value = extractApiErrorMessage(error, "加载工具调用日志失败");
+    if (!isRequestCanceled(error)) {
+      bindingError.value = extractApiErrorMessage(error, "加载工具调用日志失败");
+    }
   } finally {
-    logsLoading.value = false;
+    if (logsLoadController === controller) {
+      logsLoading.value = false;
+      logsLoadController = null;
+    }
   }
 }
 
@@ -892,10 +1067,25 @@ async function submitServer() {
     if (selectedServerId.value) {
       const updated = await updateMcpServer(selectedServerId.value, payload);
       await loadBaseResources();
+      revealServer(updated.id);
       selectedServerId.value = updated.id;
     } else {
       const created = await createMcpServer(payload);
+      toolError.value = "";
+      toolHint.value = "";
+      if (canAutoSyncServerForm.value) {
+        syncingTools.value = true;
+        try {
+          const discoveredTools = await syncMcpServerTools(created.id);
+          toolHint.value = `Server 已创建，并自动发现 ${discoveredTools.length} 个可绑定工具。`;
+        } catch (syncError) {
+          toolError.value = `Server 已创建，但自动同步工具失败：${extractApiErrorMessage(syncError, "请检查连接后重试")}`;
+        } finally {
+          syncingTools.value = false;
+        }
+      }
       await loadBaseResources();
+      revealServer(created.id);
       selectedServerId.value = created.id;
     }
   } catch (error) {
@@ -919,6 +1109,7 @@ async function removeSelectedServer() {
     await deleteMcpServer(selectedServerId.value);
     selectedServerId.value = null;
     await loadBaseResources();
+    await loadBindingsForSelectedAgent();
   } catch (error) {
     serverError.value = extractApiErrorMessage(error, "删除 MCP Server 失败");
   } finally {
@@ -932,11 +1123,14 @@ async function syncSelectedServerTools() {
   }
   syncingTools.value = true;
   toolError.value = "";
+  toolHint.value = "";
   try {
     tools.value = await syncMcpServerTools(selectedServerId.value);
+    toolHint.value = `已从远端发现 ${tools.value.length} 个工具，现在可以选择并绑定到 Agent。`;
     serializeToolsToEditor(tools.value);
     await loadBaseResources();
     await loadToolsForSelectedServer();
+    await loadBindingsForSelectedAgent();
   } catch (error) {
     toolError.value = extractApiErrorMessage(error, "同步远端工具目录失败");
   } finally {
@@ -956,6 +1150,7 @@ async function saveToolsSnapshot() {
     serializeToolsToEditor(tools.value);
     await loadBaseResources();
     await loadToolsForSelectedServer();
+    await loadBindingsForSelectedAgent();
   } catch (error) {
     toolError.value = error instanceof Error ? error.message : extractApiErrorMessage(error, "保存工具快照失败");
   } finally {
@@ -964,7 +1159,7 @@ async function saveToolsSnapshot() {
 }
 
 function resetToolsEditor() {
-  serializeToolsToEditor(tools.value);
+  serializeToolsToEditor(allServerTools.value);
   toolError.value = "";
 }
 
@@ -1018,8 +1213,13 @@ async function startAuthorization() {
       clientSecret: oauthForm.clientSecret.trim() || undefined,
       scope: oauthForm.scope.trim() || undefined
     });
+    const authorizationUrl = new URL(result.authorizationUrl);
+    if (authorizationUrl.protocol !== "https:" && authorizationUrl.protocol !== "http:") {
+      throw new Error("OAuth 授权地址必须使用 HTTP 或 HTTPS。");
+    }
     oauthHint.value = `授权链接已生成，有效期至 ${result.authorizationExpiresAt ? formatDateTime(result.authorizationExpiresAt) : "稍后过期"}。`;
-    window.open(result.authorizationUrl, "_blank", "noopener,noreferrer");
+    oauthForm.clientSecret = "";
+    window.open(authorizationUrl.toString(), "_blank", "noopener,noreferrer");
     await loadOAuthConnectionForSelectedServer();
   } catch (error) {
     oauthError.value = extractApiErrorMessage(error, "发起 OAuth 授权失败");
@@ -1042,6 +1242,7 @@ async function connectClientCredentials() {
       clientSecret: oauthForm.clientSecret.trim(),
       scope: oauthForm.scope.trim() || undefined
     });
+    oauthForm.clientSecret = "";
     oauthHint.value = "Client Credentials 连接已建立。";
   } catch (error) {
     oauthError.value = extractApiErrorMessage(error, "建立 OAuth Client Credentials 连接失败");
@@ -1069,6 +1270,15 @@ async function disconnectOAuth() {
 }
 
 watch(selectedServerId, async (value) => {
+  if (initializingWorkbench) return;
+  toolsLoadController?.abort();
+  oauthLoadController?.abort();
+  tools.value = [];
+  allServerTools.value = [];
+  toolTotal.value = 0;
+  toolTotalPages.value = 0;
+  toolsEditorJson.value = "[]";
+  oauthConnection.value = null;
   await router.replace({
     query: {
       ...route.query,
@@ -1076,13 +1286,24 @@ watch(selectedServerId, async (value) => {
       agentId: selectedAgentId.value || undefined
     }
   });
+  if (!componentActive || value !== selectedServerId.value) return;
   syncServerForm(selectedServer.value);
   toolPage.value = 0;
   await loadToolsForSelectedServer();
+  if (!componentActive) return;
   await loadOAuthConnectionForSelectedServer();
 });
 
 watch(selectedAgentId, async (value) => {
+  if (initializingWorkbench) return;
+  bindingsLoadController?.abort();
+  logsLoadController?.abort();
+  bindings.value = [];
+  allAgentBindings.value = [];
+  boundToolIds.value = [];
+  bindingTotal.value = 0;
+  bindingTotalPages.value = 0;
+  toolCallLogs.value = [];
   await router.replace({
     query: {
       ...route.query,
@@ -1090,16 +1311,34 @@ watch(selectedAgentId, async (value) => {
       agentId: value || undefined
     }
   });
+  if (!componentActive || value !== selectedAgentId.value) return;
   bindingPage.value = 0;
   await loadBindingsForSelectedAgent();
+  if (!componentActive) return;
   await loadToolCallLogsForSelectedAgent();
 });
 
 onMounted(async () => {
+  componentActive = true;
   await loadBaseResources();
+  if (!componentActive) return;
+  initializingWorkbench = false;
   await loadToolsForSelectedServer();
+  if (!componentActive) return;
   await loadBindingsForSelectedAgent();
+  if (!componentActive) return;
   await loadOAuthConnectionForSelectedServer();
+  if (!componentActive) return;
   await loadToolCallLogsForSelectedAgent();
+});
+
+onBeforeUnmount(() => {
+  componentActive = false;
+  disposeAgentSelector();
+  baseLoadController?.abort();
+  toolsLoadController?.abort();
+  bindingsLoadController?.abort();
+  oauthLoadController?.abort();
+  logsLoadController?.abort();
 });
 </script>

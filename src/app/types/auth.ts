@@ -10,7 +10,7 @@ export interface CurrentUser {
 }
 
 export interface AuthResponse {
-  accessToken: string;
+  accessToken?: string | null;
   tokenType: string;
   expiresAt: string;
   currentUser: CurrentUser;

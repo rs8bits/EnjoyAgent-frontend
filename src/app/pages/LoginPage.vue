@@ -4,14 +4,23 @@
       <div class="rounded-[24px] border border-line bg-white p-6 lg:p-7">
         <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">欢迎回来</div>
         <h1 class="mt-3 text-3xl font-semibold tracking-tight text-ink">登录你的工作台</h1>
-        <p class="mt-3 text-sm leading-6 text-muted">
-          阶段 2 先把真实登录注册链路接上。这个页面已经连到后端 `/api/auth/login`。
-        </p>
 
-        <form class="mt-8 space-y-5" @submit.prevent="submit">
+        <div
+          v-if="authStore.bootstrapError"
+          class="mt-5 rounded-[18px] border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700"
+          role="alert"
+        >
+          <p>{{ authStore.bootstrapError }}，无法确认现有登录状态。</p>
+          <button type="button" class="mt-2 font-semibold underline" :disabled="retryingSession" @click="retrySession">
+            {{ retryingSession ? "正在重试…" : "重试会话恢复" }}
+          </button>
+        </div>
+
+        <form class="mt-6 space-y-5" @submit.prevent="submit">
           <UiTextField
             v-model="form.email"
             label="邮箱"
+            autocomplete="email"
             placeholder="alice@example.com"
             :error="fieldErrors.email"
           />
@@ -19,11 +28,12 @@
             v-model="form.password"
             label="密码"
             type="password"
+            autocomplete="current-password"
             placeholder="请输入密码"
             :error="fieldErrors.password"
           />
 
-          <div v-if="submitError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+          <div v-if="submitError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600" role="alert">
             {{ submitError }}
           </div>
 
@@ -63,7 +73,13 @@ const fieldErrors = reactive({
 });
 
 const submitting = ref(false);
+const retryingSession = ref(false);
 const submitError = ref("");
+
+function redirectAfterLogin() {
+  const redirect = typeof route.query.redirect === "string" ? route.query.redirect : "";
+  return redirect === "/app" || redirect.startsWith("/app/") ? redirect : "/app/home";
+}
 
 function validate() {
   fieldErrors.email = form.email ? "" : "请输入邮箱";
@@ -89,7 +105,15 @@ async function submit() {
     return;
   }
 
-  const redirect = typeof route.query.redirect === "string" ? route.query.redirect : "/app/home";
-  await router.replace(redirect);
+  await router.replace(redirectAfterLogin());
+}
+
+async function retrySession() {
+  retryingSession.value = true;
+  await authStore.bootstrap(true);
+  retryingSession.value = false;
+  if (authStore.isAuthenticated) {
+    await router.replace(redirectAfterLogin());
+  }
 }
 </script>

@@ -2,11 +2,8 @@
   <div class="ea-scroll flex h-full min-h-0 flex-col overflow-y-auto p-5 lg:p-6">
     <div class="mb-5 flex flex-col gap-5 border-b border-line pb-5 lg:flex-row lg:items-end lg:justify-between">
       <div>
-        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">阶段 7 · 共享市场</div>
-        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">浏览、提交并安装市场资产</h1>
-        <p class="mt-2 max-w-3xl text-sm leading-6 text-muted">
-          这里把市场浏览、我的提交和安装结果整合到了一个工作台里。你可以先浏览已上架资产，也可以把自己的 Agent、知识库、MCP Server 或工作流提交到市场。
-        </p>
+        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">市场</div>
+        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">共享市场</h1>
       </div>
 
       <div class="flex flex-wrap items-center gap-3 rounded-full border border-line bg-white px-4 py-3 shadow-card">
@@ -19,7 +16,11 @@
       </div>
     </div>
 
-    <div class="grid min-h-0 flex-1 gap-5 xl:grid-cols-[300px_minmax(0,1fr)_360px]">
+    <div v-if="marketLoadError" class="mb-5 rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600" role="alert">
+      {{ marketLoadError }}
+    </div>
+
+    <div class="grid min-h-0 flex-1 gap-5 xl:grid-cols-[minmax(280px,0.72fr)_minmax(420px,1.28fr)] 2xl:grid-cols-[300px_minmax(420px,1fr)_360px]">
       <SectionCard
         class="flex h-full min-h-0 flex-col overflow-hidden"
         eyebrow="市场列表"
@@ -85,7 +86,7 @@
         />
       </SectionCard>
 
-      <div class="grid min-h-0 gap-5 xl:grid-rows-[auto_minmax(0,1fr)]">
+      <div class="ea-scroll min-h-0 space-y-5 overflow-y-auto pr-1">
         <SectionCard
           eyebrow="资产详情"
           :title="selectedAsset?.name || '请选择一个市场资产'"
@@ -137,17 +138,23 @@
         </SectionCard>
 
         <SectionCard
-          class="min-h-0 overflow-hidden"
           eyebrow="安装资产"
           title="把市场资产安装到当前租户"
           description="安装时只需要填写当前资产真正依赖的那些参数；不确定时可以先留空，按后端错误提示再补。"
         >
-          <div v-if="!selectedAsset" class="rounded-[20px] border border-dashed border-line bg-canvas px-4 py-10 text-center text-sm leading-6 text-muted">
+          <div v-if="!authStore.isOwner" class="rounded-[20px] border border-line bg-canvas px-4 py-10 text-center text-sm leading-6 text-muted">
+            当前账号是工作区成员，可以浏览市场资产；安装操作仅限工作区拥有者。
+          </div>
+
+          <div v-else-if="!selectedAsset" class="rounded-[20px] border border-dashed border-line bg-canvas px-4 py-10 text-center text-sm leading-6 text-muted">
             先在左侧选择一个市场资产，这里才会显示安装表单和结果区域。
           </div>
 
-          <div v-else class="grid h-full min-h-0 gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(320px,0.85fr)]">
-            <form class="space-y-4" @submit.prevent="installSelectedAsset">
+          <div v-else class="grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(320px,0.85fr)]">
+            <form
+              class="space-y-4"
+              @submit.prevent="installSelectedAsset"
+            >
               <UiTextField
                 v-model="installForm.name"
                 label="安装后名称"
@@ -191,12 +198,14 @@
                 />
 
                 <UiSelect
-                  v-if="selectedAsset.assetType === 'KNOWLEDGE_BASE'"
+                  v-if="selectedAsset.assetType === 'KNOWLEDGE_BASE' || selectedAsset.assetType === 'AGENT'"
                   v-model="installForm.targetEmbeddingModelConfigId"
                   label="Embedding 模型"
                   :options="embeddingModelOptions"
-                  placeholder="请选择一个 Embedding 模型"
-                  :hint="'知识库安装时，这个字段通常是必须的。'"
+                  :placeholder="selectedAsset.assetType === 'KNOWLEDGE_BASE' ? '请选择一个 Embedding 模型' : '可选：为随 Agent 安装的知识库选择模型'"
+                  :hint="selectedAsset.assetType === 'AGENT'
+                    ? '如果 Agent 模板打包了知识库，此字段为必填；没有打包知识库时可以留空。'
+                    : '知识库安装时，这个字段是必填项。'"
                 />
 
                 <UiSelect
@@ -215,13 +224,27 @@
                 hint="关闭时会先生成副本，但不会立即对外生效。"
               />
 
-              <div v-if="installError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+              <div v-if="installError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600" role="alert">
                 {{ installError }}
               </div>
 
-              <UiButton type="submit" :disabled="installingAsset">
+              <div
+                v-if="installSuccessMessage"
+                class="rounded-[18px] border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700"
+                role="status"
+                aria-live="polite"
+              >
+                {{ installSuccessMessage }}
+              </div>
+
+              <button
+                type="button"
+                class="inline-flex items-center justify-center rounded-full border border-accent bg-accent px-4 py-2.5 text-sm font-semibold text-white shadow-card transition hover:brightness-105 focus:outline-none focus:ring-2 focus:ring-accent/20 disabled:cursor-not-allowed disabled:opacity-60"
+                :disabled="installingAsset"
+                @click="installSelectedAsset"
+              >
                 {{ installingAsset ? "安装中..." : "安装到当前租户" }}
-              </UiButton>
+              </button>
             </form>
 
             <div class="flex min-h-0 flex-col">
@@ -271,9 +294,12 @@
         </SectionCard>
       </div>
 
-      <div class="ea-scroll min-h-0 space-y-5 overflow-y-auto pr-1">
+      <div class="ea-scroll min-h-0 space-y-5 overflow-y-auto pr-1 xl:col-span-2 2xl:col-span-1">
         <SectionCard eyebrow="提交市场" title="发布你的资产">
-          <form class="space-y-4" @submit.prevent="submitAsset">
+          <div v-if="!authStore.isOwner" class="rounded-[20px] border border-line bg-canvas px-4 py-8 text-sm leading-6 text-muted">
+            提交市场资产仅限工作区拥有者；你仍可浏览已上架资产和历史提交记录。
+          </div>
+          <form v-else class="space-y-4" @submit.prevent="submitAsset">
             <UiSelect
               v-model="submitForm.assetType"
               label="资产类型"
@@ -281,12 +307,51 @@
               placeholder="请选择一个资产类型"
             />
 
+            <div v-if="submitForm.assetType === 'AGENT'" class="space-y-3 rounded-[18px] border border-line bg-canvas p-3">
+              <UiTextField
+                v-model="agentSourceSearchDraft"
+                label="按名称搜索 Agent"
+                placeholder="输入完整或部分 Agent 名称"
+                :disabled="loadingAgentSources"
+                @keydown.enter.prevent.stop="applyAgentSourceSearch"
+              />
+              <div class="flex flex-wrap gap-2">
+                <UiButton type="button" variant="secondary" :disabled="loadingAgentSources" @click="applyAgentSourceSearch">
+                  {{ loadingAgentSources ? "搜索中..." : "搜索" }}
+                </UiButton>
+                <UiButton
+                  v-if="agentSourceSearch"
+                  type="button"
+                  variant="ghost"
+                  :disabled="loadingAgentSources"
+                  @click="clearAgentSourceSearch"
+                >
+                  清除搜索
+                </UiButton>
+              </div>
+              <div v-if="agentSourceSearch" class="text-xs text-muted">
+                当前搜索：{{ agentSourceSearch }}
+              </div>
+            </div>
+
             <UiSelect
               v-model="submitForm.sourceEntityId"
               label="源对象"
               :options="submitResourceOptions"
               placeholder="请选择你要提交的对象"
-              :hint="'这里只展示当前租户已有的对象。提交后会进入待审核状态。'"
+              :hint="submitForm.assetType === 'AGENT'
+                ? agentSourceHint
+                : '这里会加载当前租户的全部可提交对象；提交后进入待审核状态。'"
+              :disabled="submitForm.assetType === 'AGENT' && loadingAgentSources"
+            />
+
+            <UiPagination
+              v-if="submitForm.assetType === 'AGENT'"
+              :page="agentSourcePage"
+              :size="agentSourcePageSize"
+              :total="agentSourceTotal"
+              :total-pages="agentSourceTotalPages"
+              @change="loadAgentSources"
             />
 
             <UiTextField
@@ -302,7 +367,7 @@
               :rows="6"
             />
 
-            <div v-if="submitAssetError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+            <div v-if="submitAssetError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600" role="alert">
               {{ submitAssetError }}
             </div>
 
@@ -358,7 +423,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, toRef, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import SectionCard from "@/app/components/SectionCard.vue";
 import UiButton from "@/app/components/ui/UiButton.vue";
@@ -367,9 +432,8 @@ import UiPagination from "@/app/components/ui/UiPagination.vue";
 import UiSelect from "@/app/components/ui/UiSelect.vue";
 import UiTextField from "@/app/components/ui/UiTextField.vue";
 import UiTextarea from "@/app/components/ui/UiTextarea.vue";
-import { listAgents } from "@/app/services/agents";
 import { listCredentials } from "@/app/services/credentials";
-import { extractApiErrorMessage } from "@/app/services/http";
+import { extractApiErrorMessage, isRequestCanceled } from "@/app/services/http";
 import { listKnowledgeBases } from "@/app/services/knowledge";
 import { listMcpServers } from "@/app/services/mcp";
 import {
@@ -384,21 +448,30 @@ import {
 } from "@/app/services/market";
 import { listModelConfigs, listOfficialModelConfigs } from "@/app/services/models";
 import { listWorkflows } from "@/app/services/workflow";
-import type { Agent } from "@/app/types/agent";
+import { fetchAllPages } from "@/app/services/pagination";
+import { useAuthStore } from "@/app/stores/auth";
+import { usePaginatedAgentSelector } from "@/app/composables/usePaginatedAgentSelector";
+import {
+  buildMarketInstallPayload,
+  runMarketInstallOnce,
+  validateMarketInstallForm,
+} from "@/app/utils/marketInstall";
 import type { Credential } from "@/app/types/credential";
 import type { KnowledgeBase } from "@/app/types/knowledge";
-import type {
-  InstallMarketAssetPayload,
-  MarketAsset,
-  MarketAssetInstallResult,
-  MarketAssetType
-} from "@/app/types/market";
+import type { MarketAsset, MarketAssetInstallResult, MarketAssetType } from "@/app/types/market";
 import type { McpServer } from "@/app/types/mcp";
 import type { ModelConfig, OfficialModelConfig } from "@/app/types/model";
 import type { Workflow } from "@/app/types/workflow";
 
 const route = useRoute();
 const router = useRouter();
+const authStore = useAuthStore();
+let publishedLoadController: AbortController | null = null;
+let detailLoadController: AbortController | null = null;
+let baseLoadController: AbortController | null = null;
+let submissionLoadController: AbortController | null = null;
+let componentActive = false;
+let initializingMarket = true;
 
 const publishedAssets = ref<MarketAsset[]>([]);
 const publishedPage = ref(0);
@@ -419,9 +492,10 @@ const submittingAsset = ref(false);
 const installingAsset = ref(false);
 const submitAssetError = ref("");
 const installError = ref("");
+const installSuccessMessage = ref("");
+const marketLoadError = ref("");
 const installResult = ref<MarketAssetInstallResult | null>(null);
 
-const agents = ref<Agent[]>([]);
 const knowledgeBases = ref<KnowledgeBase[]>([]);
 const mcpServers = ref<McpServer[]>([]);
 const workflows = ref<Workflow[]>([]);
@@ -435,6 +509,20 @@ const submitForm = reactive({
   summary: "",
   description: ""
 });
+const selectedSubmitAgentId = toRef(submitForm, "sourceEntityId");
+const {
+  agentOptions: agentSourceOptions,
+  agentPage: agentSourcePage,
+  pageSize: agentSourcePageSize,
+  agentTotal: agentSourceTotal,
+  agentTotalPages: agentSourceTotalPages,
+  agentSearchInput: agentSourceSearchDraft,
+  appliedAgentSearch: agentSourceSearch,
+  agentsLoading: loadingAgentSources,
+  loadAgentPage,
+  searchAgents,
+  disposeAgentSelector,
+} = usePaginatedAgentSelector(selectedSubmitAgentId, { pageSize: 200 });
 
 const installForm = reactive({
   name: "",
@@ -467,8 +555,13 @@ const submitResourceOptions = computed(() => {
   if (submitForm.assetType === "WORKFLOW") {
     return workflows.value.map((item) => ({ label: item.name, value: String(item.id) }));
   }
-  return agents.value.map((item) => ({ label: item.name, value: String(item.id) }));
+  return agentSourceOptions.value;
 });
+
+const agentSourceHint = computed(() => agentSourceSearch.value
+  ? `搜索“${agentSourceSearch.value}”共 ${agentSourceTotal.value} 条；已选 Agent 会在切页后保留。`
+  : `共 ${agentSourceTotal.value} 个 Agent，每页 ${agentSourcePageSize} 个；可搜索或翻页选择。`
+);
 
 const userChatModelOptions = computed(() =>
   userModels.value
@@ -586,10 +679,6 @@ function parseRouteAssetId() {
   return raw && Number.isFinite(raw) ? raw : null;
 }
 
-function toOptionalNumber(value: string) {
-  return value ? Number(value) : undefined;
-}
-
 function resetInstallForm() {
   installForm.name = "";
   installForm.targetModelConfigId = "";
@@ -599,50 +688,110 @@ function resetInstallForm() {
   installForm.targetEmbeddingModelConfigId = "";
   installForm.targetCredentialId = "";
   installForm.enabled = true;
+  installError.value = "";
+  installSuccessMessage.value = "";
+  installResult.value = null;
 }
 
 async function loadBaseResources() {
+  baseLoadController?.abort();
+  const controller = new AbortController();
+  baseLoadController = controller;
+  if (!authStore.isOwner) {
+    const submissionResult = await listMyMarketSubmissions(0, submissionPageSize, controller.signal);
+    if (controller.signal.aborted) return;
+    submissions.value = submissionResult.items;
+    submissionTotal.value = submissionResult.total;
+    submissionTotalPages.value = submissionResult.totalPages;
+    if (baseLoadController === controller) baseLoadController = null;
+    return;
+  }
   const [
-    agentResult,
-    knowledgeBaseResult,
-    mcpServerResult,
-    workflowResult,
-    credentialResult,
-    userModelResult,
-    officialModelResult,
+    allKnowledgeBases,
+    allMcpServers,
+    allWorkflows,
+    allCredentials,
+    allUserModels,
+    allOfficialModels,
     submissionResult
   ] = await Promise.all([
-    listAgents(0, 999),
-    listKnowledgeBases(0, 999),
-    listMcpServers(0, 999),
-    listWorkflows(0, 999),
-    listCredentials(0, 999),
-    listModelConfigs(0, 999),
-    listOfficialModelConfigs(0, 999),
-    listMyMarketSubmissions(0, submissionPageSize)
+    fetchAllPages((page, size) => listKnowledgeBases(page, size, controller.signal)),
+    fetchAllPages((page, size) => listMcpServers(page, size, controller.signal)),
+    fetchAllPages((page, size) => listWorkflows(page, size, controller.signal)),
+    fetchAllPages((page, size) => listCredentials(page, size, controller.signal)),
+    fetchAllPages((page, size) => listModelConfigs(page, size, controller.signal)),
+    fetchAllPages((page, size) => listOfficialModelConfigs(page, size, controller.signal)),
+    listMyMarketSubmissions(0, submissionPageSize, controller.signal)
   ]);
 
-  agents.value = agentResult.items;
-  knowledgeBases.value = knowledgeBaseResult.items;
-  mcpServers.value = mcpServerResult.items;
-  workflows.value = workflowResult.items;
-  credentials.value = credentialResult.items;
-  userModels.value = userModelResult.items;
-  officialModels.value = officialModelResult.items;
+  if (controller.signal.aborted) return;
+  knowledgeBases.value = allKnowledgeBases;
+  mcpServers.value = allMcpServers;
+  workflows.value = allWorkflows;
+  credentials.value = allCredentials;
+  userModels.value = allUserModels;
+  officialModels.value = allOfficialModels;
   submissions.value = submissionResult.items;
   submissionTotal.value = submissionResult.total;
   submissionTotalPages.value = submissionResult.totalPages;
+  if (baseLoadController === controller) baseLoadController = null;
+}
+
+async function loadAgentSources(newPage?: number) {
+  if (!authStore.isOwner) {
+    return false;
+  }
+  marketLoadError.value = "";
+  try {
+    return await loadAgentPage(newPage ?? 0);
+  } catch (error) {
+    if (!isRequestCanceled(error)) {
+      marketLoadError.value = extractApiErrorMessage(error, "加载 Agent 提交源失败");
+    }
+    return false;
+  }
+}
+
+async function applyAgentSourceSearch() {
+  marketLoadError.value = "";
+  try {
+    await searchAgents();
+  } catch (error) {
+    if (!isRequestCanceled(error)) {
+      marketLoadError.value = extractApiErrorMessage(error, "搜索 Agent 提交源失败");
+    }
+  }
+}
+
+async function clearAgentSourceSearch() {
+  agentSourceSearchDraft.value = "";
+  marketLoadError.value = "";
+  try {
+    await loadAgentPage(0, undefined, "");
+  } catch (error) {
+    if (!isRequestCanceled(error)) {
+      marketLoadError.value = extractApiErrorMessage(error, "加载 Agent 提交源失败");
+    }
+  }
 }
 
 async function loadPublishedAssets(newPage?: number) {
   if (newPage !== undefined) publishedPage.value = newPage;
+  publishedLoadController?.abort();
+  const controller = new AbortController();
+  publishedLoadController = controller;
+  const requestedType = assetTypeFilter.value;
+  const requestedPage = publishedPage.value;
   loadingPublished.value = true;
+  marketLoadError.value = "";
   try {
     const result = await listPublishedMarketAssets(
-      (assetTypeFilter.value || undefined) as MarketAssetType | undefined,
-      publishedPage.value,
-      publishedPageSize
+      (requestedType || undefined) as MarketAssetType | undefined,
+      requestedPage,
+      publishedPageSize,
+      controller.signal
     );
+    if (controller.signal.aborted || requestedType !== assetTypeFilter.value || requestedPage !== publishedPage.value) return;
     publishedAssets.value = result.items;
     publishedTotal.value = result.total;
     publishedTotalPages.value = result.totalPages;
@@ -656,38 +805,65 @@ async function loadPublishedAssets(newPage?: number) {
       const candidate = publishedAssets.value.find((item) => item.id === routeAssetId) ?? publishedAssets.value[0] ?? null;
       selectedAssetId.value = candidate?.id ?? null;
     }
+  } catch (error) {
+    if (!isRequestCanceled(error)) {
+      marketLoadError.value = extractApiErrorMessage(error, "加载市场资产失败");
+    }
   } finally {
-    loadingPublished.value = false;
+    if (publishedLoadController === controller) {
+      loadingPublished.value = false;
+      publishedLoadController = null;
+    }
   }
 }
 
 async function loadSelectedAsset() {
-  installError.value = "";
+  marketLoadError.value = "";
   installResult.value = null;
   if (!selectedAssetId.value) {
     selectedAsset.value = null;
     return;
   }
 
+  detailLoadController?.abort();
+  const controller = new AbortController();
+  detailLoadController = controller;
+  const requestedAssetId = selectedAssetId.value;
   detailLoading.value = true;
   try {
-    selectedAsset.value = await getMarketAsset(selectedAssetId.value);
+    const asset = await getMarketAsset(requestedAssetId, controller.signal);
+    if (controller.signal.aborted || requestedAssetId !== selectedAssetId.value) return;
+    selectedAsset.value = asset;
   } catch (error) {
-    installError.value = extractApiErrorMessage(error, "加载市场资产详情失败");
+    if (!isRequestCanceled(error)) {
+      marketLoadError.value = extractApiErrorMessage(error, "加载市场资产详情失败");
+    }
   } finally {
-    detailLoading.value = false;
+    if (detailLoadController === controller) {
+      detailLoading.value = false;
+      detailLoadController = null;
+    }
   }
 }
 
 async function loadSubmissions(newPage?: number) {
   if (newPage !== undefined) submissionPage.value = newPage;
+  submissionLoadController?.abort();
+  const controller = new AbortController();
+  submissionLoadController = controller;
+  const requestedPage = submissionPage.value;
   try {
-    const result = await listMyMarketSubmissions(submissionPage.value, submissionPageSize);
+    const result = await listMyMarketSubmissions(requestedPage, submissionPageSize, controller.signal);
+    if (controller.signal.aborted || requestedPage !== submissionPage.value) return;
     submissions.value = result.items;
     submissionTotal.value = result.total;
     submissionTotalPages.value = result.totalPages;
   } catch (error) {
-    submitAssetError.value = extractApiErrorMessage(error, "加载提交记录失败");
+    if (!isRequestCanceled(error)) {
+      marketLoadError.value = extractApiErrorMessage(error, "加载提交记录失败");
+    }
+  } finally {
+    if (submissionLoadController === controller) submissionLoadController = null;
   }
 }
 
@@ -697,6 +873,10 @@ function selectAsset(id: number) {
 
 async function submitAsset() {
   submitAssetError.value = "";
+  if (!authStore.isOwner) {
+    submitAssetError.value = "只有工作区拥有者可以提交市场资产。";
+    return;
+  }
   if (!submitForm.sourceEntityId) {
     submitAssetError.value = "请先选择一个要提交的对象。";
     return;
@@ -724,10 +904,7 @@ async function submitAsset() {
     submitForm.summary = "";
     submitForm.description = "";
     submissionPage.value = 0;
-    const result = await listMyMarketSubmissions(0, submissionPageSize);
-    submissions.value = result.items;
-    submissionTotal.value = result.total;
-    submissionTotalPages.value = result.totalPages;
+    await loadSubmissions();
   } catch (error) {
     submitAssetError.value = extractApiErrorMessage(error, "提交市场资产失败");
   } finally {
@@ -736,31 +913,37 @@ async function submitAsset() {
 }
 
 async function installSelectedAsset() {
+  if (installingAsset.value) {
+    return;
+  }
+  installError.value = "";
+  installSuccessMessage.value = "";
+  if (!authStore.isOwner) {
+    installError.value = "只有工作区拥有者可以安装市场资产。";
+    return;
+  }
   if (!selectedAsset.value || !selectedAssetId.value) {
+    installError.value = "请先选择一个要安装的市场资产。";
     return;
   }
 
-  installingAsset.value = true;
-  installError.value = "";
+  const validationError = validateMarketInstallForm(selectedAsset.value.assetType, installForm);
+  if (validationError) {
+    installError.value = validationError;
+    return;
+  }
+
   installResult.value = null;
   try {
-    const payload: InstallMarketAssetPayload = {
-      name: installForm.name.trim() || undefined,
-      targetModelConfigId: toOptionalNumber(installForm.targetModelConfigId),
-      targetOfficialModelConfigId: toOptionalNumber(installForm.targetOfficialModelConfigId),
-      targetKnowledgeBaseId: toOptionalNumber(installForm.targetKnowledgeBaseId),
-      targetRerankModelConfigId: toOptionalNumber(installForm.targetRerankModelConfigId),
-      targetEmbeddingModelConfigId: toOptionalNumber(installForm.targetEmbeddingModelConfigId),
-      targetCredentialId: toOptionalNumber(installForm.targetCredentialId),
-      enabled: installForm.enabled
-    };
-
-    installResult.value = await installMarketAsset(selectedAssetId.value, payload);
-    await Promise.all([loadBaseResources(), loadPublishedAssets()]);
+    await runMarketInstallOnce(installingAsset, async () => {
+      const result = await installMarketAsset(selectedAssetId.value!, buildMarketInstallPayload(installForm));
+      installResult.value = result;
+      installSuccessMessage.value = `“${result.installedName}”安装成功，新对象 ID 为 ${result.installedEntityId}。`;
+      await loadPublishedAssets();
+      return result;
+    });
   } catch (error) {
     installError.value = extractApiErrorMessage(error, "安装市场资产失败");
-  } finally {
-    installingAsset.value = false;
   }
 }
 
@@ -768,6 +951,7 @@ watch(assetTypeFilter, async () => {
   selectedAssetId.value = null;
   publishedPage.value = 0;
   await loadPublishedAssets();
+  if (!componentActive) return;
   await loadSelectedAsset();
 });
 
@@ -776,25 +960,43 @@ watch(() => submitForm.assetType, () => {
 });
 
 watch(selectedAssetId, async (value) => {
+  if (initializingMarket) return;
   await router.replace({
     query: {
       ...route.query,
       assetId: value ? String(value) : undefined
     }
   });
+  if (!componentActive || value !== selectedAssetId.value) return;
   resetInstallForm();
   await loadSelectedAsset();
 });
 
 onMounted(async () => {
+  componentActive = true;
   try {
-    await loadBaseResources();
+    await Promise.all([loadBaseResources(), loadAgentSources()]);
+    if (!componentActive) return;
     await loadPublishedAssets();
+    if (!componentActive) return;
+    initializingMarket = false;
     if (selectedAssetId.value) {
       await loadSelectedAsset();
     }
   } catch (error) {
-    installError.value = extractApiErrorMessage(error, "加载共享市场工作台失败");
+    initializingMarket = false;
+    if (!isRequestCanceled(error)) {
+      marketLoadError.value = extractApiErrorMessage(error, "加载共享市场工作台失败");
+    }
   }
+});
+
+onBeforeUnmount(() => {
+  componentActive = false;
+  publishedLoadController?.abort();
+  detailLoadController?.abort();
+  baseLoadController?.abort();
+  submissionLoadController?.abort();
+  disposeAgentSelector();
 });
 </script>

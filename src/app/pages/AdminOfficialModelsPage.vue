@@ -2,11 +2,8 @@
   <div class="ea-scroll h-full overflow-y-auto p-5 lg:p-8">
     <div class="mb-6 flex flex-col gap-4 border-b border-line pb-6 lg:flex-row lg:items-end lg:justify-between">
       <div>
-        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">阶段 8 · 官方模型管理</div>
+        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">模型管理</div>
         <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">管理官方模型凭证与价格</h1>
-        <p class="mt-2 max-w-3xl text-sm leading-6 text-muted">
-          这里直接接管理端官方模型接口。你可以先维护托管凭证，再创建聊天、Embedding 或 Rerank 的官方模型配置，并设置百万 token 单价。
-        </p>
       </div>
 
       <UiButton variant="secondary" :disabled="loading" @click="loadAdminModels">
@@ -74,13 +71,14 @@
           <UiTextField
             v-model="credentialForm.secretPlaintext"
             type="password"
+            autocomplete="new-password"
             label="API Key"
             placeholder="创建时必填；编辑时留空表示不修改"
             :error="credentialErrors.secretPlaintext"
           />
           <UiCheckbox v-model="credentialForm.enabled" label="启用该凭证" hint="停用后它不会再被官方模型配置使用。" />
 
-          <div v-if="credentialError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+          <div v-if="credentialError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600" role="alert">
             {{ credentialError }}
           </div>
 
@@ -173,8 +171,8 @@
           />
 
           <div class="grid gap-4 md:grid-cols-2">
-            <UiTextField v-model="configForm.temperature" label="默认温度" placeholder="例如：0.2" />
-            <UiTextField v-model="configForm.maxTokens" label="默认最大 Token" placeholder="例如：2048" />
+            <UiTextField v-model="configForm.temperature" label="默认温度" placeholder="例如：0.2" :error="configErrors.temperature" />
+            <UiTextField v-model="configForm.maxTokens" label="默认最大 Token" placeholder="例如：2048" :error="configErrors.maxTokens" />
           </div>
 
           <div class="grid gap-4 md:grid-cols-3">
@@ -192,7 +190,7 @@
 
           <UiCheckbox v-model="configForm.enabled" label="启用该官方模型" hint="停用后普通用户将无法继续选择这条官方模型配置。" />
 
-          <div v-if="configError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+          <div v-if="configError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600" role="alert">
             {{ configError }}
           </div>
 
@@ -219,7 +217,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref, computed } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import SectionCard from "@/app/components/SectionCard.vue";
 import UiButton from "@/app/components/ui/UiButton.vue";
 import UiCheckbox from "@/app/components/ui/UiCheckbox.vue";
@@ -238,13 +236,16 @@ import {
   updateAdminOfficialModelConfig,
   updateAdminOfficialModelCredential
 } from "@/app/services/admin";
-import { extractApiErrorMessage } from "@/app/services/http";
+import { extractApiErrorMessage, isRequestCanceled } from "@/app/services/http";
+import { fetchAllPages } from "@/app/services/pagination";
 import type {
   OfficialModelConfig,
   OfficialModelCredential
 } from "@/app/types/admin";
+import { formatDecimalString, isValidDecimalString, normalizeDecimalString } from "@/app/utils/decimal";
 
 const credentials = ref<OfficialModelCredential[]>([]);
+const allCredentials = ref<OfficialModelCredential[]>([]);
 const credPage = ref(0);
 const credPageSize = 20;
 const credTotal = ref(0);
@@ -254,7 +255,10 @@ const configPage = ref(0);
 const configPageSize = 20;
 const configTotal = ref(0);
 const configTotalPages = ref(0);
-const loading = ref(false);
+const credentialsLoading = ref(false);
+const configsLoading = ref(false);
+const refreshLoading = ref(false);
+const loading = computed(() => credentialsLoading.value || configsLoading.value || refreshLoading.value);
 const savingCredential = ref(false);
 const deletingCredential = ref(false);
 const savingConfig = ref(false);
@@ -263,6 +267,9 @@ const selectedCredentialId = ref<number | null>(null);
 const selectedConfigId = ref<number | null>(null);
 const credentialError = ref("");
 const configError = ref("");
+let credentialListController: AbortController | null = null;
+let configListController: AbortController | null = null;
+let refreshController: AbortController | null = null;
 
 const providerOptions = [...credentialProviderOptions];
 const modelTypeOptionsLocal = [...modelTypeOptions];
@@ -300,21 +307,22 @@ const configErrors = reactive({
   name: "",
   modelName: "",
   officialCredentialId: "",
+  temperature: "",
+  maxTokens: "",
   inputPricePerMillion: "",
   outputPricePerMillion: "",
   currency: ""
 });
 
 const credentialOptions = computed(() =>
-  credentials.value.map((credential) => ({
+  allCredentials.value.map((credential) => ({
     label: `${credential.name} · ${credential.provider}`,
     value: String(credential.id)
   }))
 );
 
-function formatMoney(value: string | number | null | undefined) {
-  const amount = Number(value ?? 0);
-  return amount.toFixed(2);
+function formatMoney(value: string | null | undefined) {
+  return formatDecimalString(value);
 }
 
 function resetCredentialForm() {
@@ -383,6 +391,8 @@ function startCreateConfig() {
   configErrors.name = "";
   configErrors.modelName = "";
   configErrors.officialCredentialId = "";
+  configErrors.temperature = "";
+  configErrors.maxTokens = "";
   configErrors.inputPricePerMillion = "";
   configErrors.outputPricePerMillion = "";
   configErrors.currency = "";
@@ -390,7 +400,15 @@ function startCreateConfig() {
 
 function validateCredentialForm() {
   credentialErrors.name = credentialForm.name.trim() ? "" : "请输入凭证名称";
-  credentialErrors.baseUrl = credentialForm.baseUrl.trim() ? "" : "请输入基础地址";
+  const baseUrl = credentialForm.baseUrl.trim();
+  try {
+    const parsedUrl = new URL(baseUrl);
+    credentialErrors.baseUrl = parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:"
+      ? ""
+      : "基础地址必须使用 HTTP 或 HTTPS";
+  } catch {
+    credentialErrors.baseUrl = baseUrl ? "请输入合法的 HTTP(S) 地址" : "请输入基础地址";
+  }
   credentialErrors.secretPlaintext = selectedCredentialId.value
     ? ""
     : credentialForm.secretPlaintext.trim()
@@ -400,21 +418,36 @@ function validateCredentialForm() {
 }
 
 function validateConfigForm() {
-  const inputPrice = Number(configForm.inputPricePerMillion.trim());
-  const outputPrice = Number(configForm.outputPricePerMillion.trim());
+  const inputPrice = configForm.inputPricePerMillion.trim();
+  const outputPrice = configForm.outputPricePerMillion.trim();
+  const temperature = configForm.temperature.trim();
+  const temperatureNumber = Number(temperature);
+  const maxTokens = configForm.maxTokens.trim();
+  const maxTokensNumber = Number(maxTokens);
   configErrors.name = configForm.name.trim() ? "" : "请输入模型名称";
   configErrors.modelName = configForm.modelName.trim() ? "" : "请输入运行时模型名";
   configErrors.officialCredentialId = configForm.officialCredentialId ? "" : "请选择一条托管凭证";
-  configErrors.inputPricePerMillion = !configForm.inputPricePerMillion.trim() || Number.isNaN(inputPrice) || inputPrice < 0
+  configErrors.temperature = !temperature
+    || (/^\d+(?:\.\d+)?$/.test(temperature) && temperatureNumber >= 0 && temperatureNumber <= 2)
+    ? ""
+    : "采样温度必须是 0 到 2 之间的数字";
+  configErrors.maxTokens = configForm.modelType === "CHAT" && !maxTokens
+    ? "官方对话模型必须设置最大输出 Token"
+    : !maxTokens || (/^\d+$/.test(maxTokens) && maxTokensNumber >= 1 && maxTokensNumber <= 131_072)
+      ? ""
+      : "最大输出 Token 必须是 1 到 131072 之间的整数";
+  configErrors.inputPricePerMillion = !inputPrice || !isValidDecimalString(inputPrice)
     ? "请输入合法的输入单价"
     : "";
-  configErrors.outputPricePerMillion = !configForm.outputPricePerMillion.trim() || Number.isNaN(outputPrice) || outputPrice < 0
+  configErrors.outputPricePerMillion = !outputPrice || !isValidDecimalString(outputPrice)
     ? "请输入合法的输出单价"
     : "";
   configErrors.currency = configForm.currency.trim() ? "" : "请输入币种";
   return !configErrors.name
     && !configErrors.modelName
     && !configErrors.officialCredentialId
+    && !configErrors.temperature
+    && !configErrors.maxTokens
     && !configErrors.inputPricePerMillion
     && !configErrors.outputPricePerMillion
     && !configErrors.currency;
@@ -422,51 +455,91 @@ function validateConfigForm() {
 
 async function loadCredentials(newPage?: number) {
   if (newPage !== undefined) credPage.value = newPage;
-  loading.value = true;
+  refreshController?.abort();
+  credentialListController?.abort();
+  const controller = new AbortController();
+  credentialListController = controller;
+  const requestedPage = credPage.value;
+  credentialsLoading.value = true;
+  credentialError.value = "";
   try {
-    const result = await listAdminOfficialModelCredentials(credPage.value, credPageSize);
+    const result = await listAdminOfficialModelCredentials(requestedPage, credPageSize, controller.signal);
+    if (controller.signal.aborted || requestedPage !== credPage.value) return;
     credentials.value = result.items;
     credTotal.value = result.total;
     credTotalPages.value = result.totalPages;
   } catch (error) {
-    credentialError.value = extractApiErrorMessage(error, "加载托管凭证失败");
+    if (!isRequestCanceled(error)) {
+      credentialError.value = extractApiErrorMessage(error, "加载托管凭证失败");
+    }
   } finally {
-    loading.value = false;
+    if (credentialListController === controller) {
+      credentialsLoading.value = false;
+      credentialListController = null;
+    }
   }
 }
 
 async function loadConfigs(newPage?: number) {
   if (newPage !== undefined) configPage.value = newPage;
-  loading.value = true;
+  refreshController?.abort();
+  configListController?.abort();
+  const controller = new AbortController();
+  configListController = controller;
+  const requestedPage = configPage.value;
+  configsLoading.value = true;
+  configError.value = "";
   try {
-    const result = await listAdminOfficialModelConfigs(configPage.value, configPageSize);
+    const result = await listAdminOfficialModelConfigs(requestedPage, configPageSize, controller.signal);
+    if (controller.signal.aborted || requestedPage !== configPage.value) return;
     configs.value = result.items;
     configTotal.value = result.total;
     configTotalPages.value = result.totalPages;
   } catch (error) {
-    configError.value = extractApiErrorMessage(error, "加载官方模型配置失败");
+    if (!isRequestCanceled(error)) {
+      configError.value = extractApiErrorMessage(error, "加载官方模型配置失败");
+    }
   } finally {
-    loading.value = false;
+    if (configListController === controller) {
+      configsLoading.value = false;
+      configListController = null;
+    }
   }
 }
 
 async function loadAdminModels() {
-  loading.value = true;
+  refreshController?.abort();
+  credentialListController?.abort();
+  configListController?.abort();
+  const controller = new AbortController();
+  refreshController = controller;
+  refreshLoading.value = true;
+  credentialError.value = "";
+  configError.value = "";
   try {
-    const [credentialResult, configResult] = await Promise.all([
-      listAdminOfficialModelCredentials(0, credPageSize),
-      listAdminOfficialModelConfigs(0, configPageSize)
+    const [credentialList, configResult] = await Promise.all([
+      fetchAllPages((page, size) => listAdminOfficialModelCredentials(page, size, controller.signal)),
+      listAdminOfficialModelConfigs(0, configPageSize, controller.signal)
     ]);
-    credentials.value = credentialResult.items;
-    credTotal.value = credentialResult.total;
-    credTotalPages.value = credentialResult.totalPages;
+    if (controller.signal.aborted) return;
+    credPage.value = 0;
+    configPage.value = 0;
+    allCredentials.value = credentialList;
+    credentials.value = credentialList.slice(0, credPageSize);
+    credTotal.value = credentialList.length;
+    credTotalPages.value = Math.ceil(credentialList.length / credPageSize);
     configs.value = configResult.items;
     configTotal.value = configResult.total;
     configTotalPages.value = configResult.totalPages;
   } catch (error) {
-    credentialError.value = extractApiErrorMessage(error, "加载官方模型中心失败");
+    if (!isRequestCanceled(error)) {
+      credentialError.value = extractApiErrorMessage(error, "加载官方模型中心失败");
+    }
   } finally {
-    loading.value = false;
+    if (refreshController === controller) {
+      refreshLoading.value = false;
+      refreshController = null;
+    }
   }
 }
 
@@ -489,6 +562,7 @@ async function submitCredential() {
     if (selectedCredentialId.value) {
       await updateAdminOfficialModelCredential(selectedCredentialId.value, {
         name: payload.name,
+        provider: payload.provider,
         baseUrl: payload.baseUrl,
         secretPlaintext: payload.secretPlaintext,
         enabled: payload.enabled
@@ -543,8 +617,8 @@ async function submitConfig() {
       officialCredentialId: Number(configForm.officialCredentialId),
       temperature: configForm.temperature.trim() ? Number(configForm.temperature) : undefined,
       maxTokens: configForm.maxTokens.trim() ? Number(configForm.maxTokens) : undefined,
-      inputPricePerMillion: Number(configForm.inputPricePerMillion),
-      outputPricePerMillion: Number(configForm.outputPricePerMillion),
+      inputPricePerMillion: normalizeDecimalString(configForm.inputPricePerMillion),
+      outputPricePerMillion: normalizeDecimalString(configForm.outputPricePerMillion),
       currency: configForm.currency.trim(),
       description: configForm.description.trim() || undefined,
       enabled: configForm.enabled
@@ -585,5 +659,11 @@ async function removeConfig() {
 
 onMounted(async () => {
   await loadAdminModels();
+});
+
+onBeforeUnmount(() => {
+  credentialListController?.abort();
+  configListController?.abort();
+  refreshController?.abort();
 });
 </script>

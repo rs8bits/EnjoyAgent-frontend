@@ -9,6 +9,7 @@ import type {
   McpOAuthConnection,
   McpServer,
   McpTool,
+  McpToolApproval,
   McpToolCallLog,
   ReplaceAgentToolBindingsPayload,
   ReplaceMcpServerToolsPayload,
@@ -16,9 +17,10 @@ import type {
   UpdateMcpServerPayload
 } from "@/app/types/mcp";
 
-export async function listMcpServers(page = 0, size = 20) {
+export async function listMcpServers(page = 0, size = 20, signal?: AbortSignal) {
   const response = await http.get<ApiResponse<PagedResponse<McpServer>>>("/api/mcp/servers", {
-    params: { page, size }
+    params: { page, size },
+    signal
   });
   return extractPagedResponseData(response);
 }
@@ -47,17 +49,27 @@ export async function replaceMcpServerTools(id: number, payload: ReplaceMcpServe
   return response.data.data;
 }
 
-export async function listMcpTools(serverId?: number, page = 0, size = 20) {
+export async function listMcpTools(serverId?: number, page = 0, size = 20, signal?: AbortSignal) {
   const response = await http.get<ApiResponse<PagedResponse<McpTool>>>("/api/mcp/tools", {
-    params: { ...(serverId ? { serverId } : {}), page, size }
+    params: { ...(serverId ? { serverId } : {}), page, size },
+    signal
   });
   return extractPagedResponseData(response);
 }
 
-export async function listAgentToolBindings(agentId: number, page = 0, size = 20) {
+export async function approveHighRiskMcpTool(toolId: number, agentId: number, signal?: AbortSignal) {
+  const response = await http.post<ApiResponse<McpToolApproval>>(
+    `/api/mcp/tools/${toolId}/approvals`,
+    undefined,
+    { params: { agentId }, ...(signal ? { signal } : {}) }
+  );
+  return response.data.data;
+}
+
+export async function listAgentToolBindings(agentId: number, page = 0, size = 20, signal?: AbortSignal) {
   const response = await http.get<ApiResponse<PagedResponse<AgentToolBinding>>>(
     `/api/agents/${agentId}/tool-bindings`,
-    { params: { page, size } }
+    { params: { page, size }, signal }
   );
   return extractPagedResponseData(response);
 }
@@ -67,15 +79,16 @@ export async function replaceAgentToolBindings(agentId: number, payload: Replace
   return response.data.data;
 }
 
-export async function listMcpToolCallLogs(query: ListMcpToolCallLogsQuery = {}) {
+export async function listMcpToolCallLogs(query: ListMcpToolCallLogsQuery = {}, signal?: AbortSignal) {
   const response = await http.get<ApiResponse<McpToolCallLog[]>>("/api/mcp/tool-call-logs", {
-    params: query
+    params: query,
+    signal
   });
   return response.data.data;
 }
 
-export async function getMcpOAuthConnection(serverId: number) {
-  const response = await http.get<ApiResponse<McpOAuthConnection>>(`/api/mcp/servers/${serverId}/oauth/connection`);
+export async function getMcpOAuthConnection(serverId: number, signal?: AbortSignal) {
+  const response = await http.get<ApiResponse<McpOAuthConnection>>(`/api/mcp/servers/${serverId}/oauth/connection`, { signal });
   return response.data.data;
 }
 

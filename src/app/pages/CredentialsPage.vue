@@ -2,11 +2,8 @@
   <div class="ea-scroll h-full overflow-y-auto p-5 lg:p-8">
     <div class="mb-6 flex flex-col gap-4 border-b border-line pb-6 lg:flex-row lg:items-end lg:justify-between">
       <div>
-        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">阶段 3 · 凭证管理</div>
-        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">管理你的模型凭证</h1>
-        <p class="mt-2 max-w-3xl text-sm leading-6 text-muted">
-          这里管理你自己的 API Key。系统只会返回脱敏后的密钥展示，真实密钥只会在创建或更新时提交到后端。
-        </p>
+        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">凭证</div>
+        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">凭证管理</h1>
       </div>
       <div class="flex flex-wrap items-center gap-3">
         <div class="rounded-full border border-line bg-white px-4 py-2.5 text-sm text-muted shadow-sm">
@@ -89,8 +86,9 @@
             v-model="form.secret"
             :label="selectedId ? '新密钥（可选）' : 'API Key'"
             type="password"
+            autocomplete="new-password"
             :placeholder="selectedId ? '不填写则保留原密钥' : '请输入 API Key'"
-            :hint="selectedId ? '编辑时如果不填写，将继续使用原来的密钥。' : '创建成功后前端不会再显示真实密钥。'"
+            :hint="selectedId ? '留空会继续使用原密钥。' : '创建后仅显示掩码。'"
             :error="errors.secret"
           />
 
@@ -116,7 +114,7 @@
             :options="credentialStatusSelectOptions"
           />
 
-          <div v-if="submitError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+          <div v-if="submitError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600" role="alert">
             {{ submitError }}
           </div>
 
@@ -144,7 +142,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch } from "vue";
+import { onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import SectionCard from "@/app/components/SectionCard.vue";
 import UiButton from "@/app/components/ui/UiButton.vue";
 import UiPagination from "@/app/components/ui/UiPagination.vue";
@@ -153,7 +151,7 @@ import UiTextarea from "@/app/components/ui/UiTextarea.vue";
 import UiTextField from "@/app/components/ui/UiTextField.vue";
 import { credentialProviderOptions, credentialStatusOptions } from "@/app/constants/options";
 import { createCredential, deleteCredential, listCredentials, updateCredential } from "@/app/services/credentials";
-import { extractApiErrorMessage } from "@/app/services/http";
+import { extractApiErrorMessage, isRequestCanceled } from "@/app/services/http";
 import type { Credential, CredentialProvider } from "@/app/types/credential";
 
 const credentials = ref<Credential[]>([]);
@@ -166,6 +164,7 @@ const saving = ref(false);
 const deleting = ref(false);
 const submitError = ref("");
 const selectedId = ref<number | null>(null);
+let loadController: AbortController | null = null;
 
 const credentialProviderSelectOptions = credentialProviderOptions.map((option) => ({ ...option }));
 const credentialStatusSelectOptions = credentialStatusOptions.map((option) => ({ ...option }));
@@ -224,7 +223,14 @@ function providerLabel(provider: string) {
 function validate() {
   errors.name = form.name.trim() ? "" : "请输入凭证名称";
   errors.secret = selectedId.value || form.secret.trim() ? "" : "请输入 API Key";
-  errors.baseUrl = form.baseUrl.trim() ? "" : "请输入接口基础地址";
+  try {
+    const url = new URL(form.baseUrl.trim());
+    errors.baseUrl = url.protocol === "https:" || url.protocol === "http:"
+      ? ""
+      : "接口地址只支持 HTTP 或 HTTPS";
+  } catch {
+    errors.baseUrl = "请输入合法的接口基础地址";
+  }
   return !errors.name && !errors.secret && !errors.baseUrl;
 }
 
@@ -240,31 +246,50 @@ function defaultBaseUrlForProvider(provider: string) {
 
 async function loadCredentials(newPage?: number) {
   if (newPage !== undefined) page.value = newPage;
+  loadController?.abort();
+  const controller = new AbortController();
+  loadController = controller;
+  const requestedPage = page.value;
   loading.value = true;
   try {
-    const result = await listCredentials(page.value, pageSize);
+    const result = await listCredentials(requestedPage, pageSize, controller.signal);
+    if (controller.signal.aborted || requestedPage !== page.value) return;
     credentials.value = result.items;
     total.value = result.total;
     totalPages.value = result.totalPages;
   } catch (error) {
-    submitError.value = extractApiErrorMessage(error, "加载凭证失败");
+    if (!isRequestCanceled(error)) {
+      submitError.value = extractApiErrorMessage(error, "加载凭证失败");
+    }
   } finally {
-    loading.value = false;
+    if (loadController === controller) {
+      loading.value = false;
+      loadController = null;
+    }
   }
 }
 
 async function loadAll() {
   page.value = 0;
+  loadController?.abort();
+  const controller = new AbortController();
+  loadController = controller;
   loading.value = true;
   try {
-    const result = await listCredentials(0, pageSize);
+    const result = await listCredentials(0, pageSize, controller.signal);
+    if (controller.signal.aborted) return;
     credentials.value = result.items;
     total.value = result.total;
     totalPages.value = result.totalPages;
   } catch (error) {
-    submitError.value = extractApiErrorMessage(error, "加载凭证失败");
+    if (!isRequestCanceled(error)) {
+      submitError.value = extractApiErrorMessage(error, "加载凭证失败");
+    }
   } finally {
-    loading.value = false;
+    if (loadController === controller) {
+      loading.value = false;
+      loadController = null;
+    }
   }
 }
 
@@ -338,4 +363,6 @@ watch(
     }
   }
 );
+
+onBeforeUnmount(() => loadController?.abort());
 </script>

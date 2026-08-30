@@ -2,11 +2,8 @@
   <div class="ea-scroll h-full overflow-y-auto p-5 lg:p-8">
     <div class="mb-6 flex flex-col gap-4 border-b border-line pb-6 lg:flex-row lg:items-end lg:justify-between">
       <div>
-        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">阶段 6 · Agent 管理</div>
-        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">创建你的第一个 Agent</h1>
-        <p class="mt-2 max-w-3xl text-sm leading-6 text-muted">
-          现在知识库绑定和 MCP 模块都已经接通。你可以先把聊天模型和知识库配置好，再去 MCP 页面给 Agent 绑定工具。
-        </p>
+        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">Agent</div>
+        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">Agent 管理</h1>
       </div>
       <div class="flex flex-wrap items-center gap-3">
         <div class="rounded-full border border-line bg-white px-4 py-2.5 text-sm text-muted shadow-sm">
@@ -59,6 +56,9 @@
               <span class="rounded-full border border-line bg-white px-3 py-1">
                 {{ agent.memoryEnabled ? `记忆阈值 ${agent.memoryUpdateMessageThreshold}` : "未启用记忆" }}
               </span>
+              <span class="rounded-full border border-line bg-white px-3 py-1">
+                {{ agent.workflowName ? `工作流 ${agent.workflowName}` : "未绑定工作流" }}
+              </span>
             </div>
           </button>
         </div>
@@ -75,7 +75,6 @@
       <SectionCard
         eyebrow="编辑区"
         :title="selectedId ? '编辑 Agent' : '新建 Agent'"
-        description="聊天模型和知识库在这里配置；工具绑定已经挪到独立的 MCP 页面统一管理。"
       >
         <form class="space-y-5" @submit.prevent="submit">
           <UiTextField
@@ -159,6 +158,15 @@
             :hint="knowledgeBaseHint"
           />
 
+          <UiSelect
+            v-if="selectedId"
+            v-model="form.workflowId"
+            label="绑定工作流"
+            :options="workflowOptions"
+            placeholder="可选：给 Agent 绑定一个工作流"
+            hint="绑定后，聊天工作台会按该工作流编排请求；新建 Agent 后可在编辑状态配置。"
+          />
+
           <div class="grid gap-3 md:grid-cols-2">
             <UiCheckbox
               v-model="form.memoryEnabled"
@@ -172,17 +180,7 @@
             />
           </div>
 
-          <div class="rounded-[18px] border border-line bg-canvas px-4 py-4 text-sm leading-6 text-muted">
-            当前阶段默认使用：
-            <br>
-            1. `上下文策略 = SLIDING_WINDOW`
-            <br>
-            2. `Rerank = 关闭`
-            <br>
-            3. `知识库已接入，MCP 工具绑定请前往“/app/mcp”页面配置`
-          </div>
-
-          <div v-if="submitError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+          <div v-if="submitError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600" role="alert">
             {{ submitError }}
           </div>
 
@@ -210,7 +208,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { useRoute } from "vue-router";
 import SectionCard from "@/app/components/SectionCard.vue";
 import UiButton from "@/app/components/ui/UiButton.vue";
@@ -220,12 +218,15 @@ import UiSelect from "@/app/components/ui/UiSelect.vue";
 import UiTextarea from "@/app/components/ui/UiTextarea.vue";
 import UiTextField from "@/app/components/ui/UiTextField.vue";
 import { createAgent, deleteAgent, listAgents, updateAgent } from "@/app/services/agents";
-import { extractApiErrorMessage } from "@/app/services/http";
+import { extractApiErrorMessage, isRequestCanceled } from "@/app/services/http";
 import { listKnowledgeBases } from "@/app/services/knowledge";
 import { listModelConfigs, listOfficialModelConfigs } from "@/app/services/models";
+import { fetchAllPages } from "@/app/services/pagination";
+import { listWorkflows } from "@/app/services/workflow";
 import type { Agent, AgentChatModelBindingType } from "@/app/types/agent";
 import type { KnowledgeBase } from "@/app/types/knowledge";
 import type { ModelConfig, OfficialModelConfig } from "@/app/types/model";
+import type { Workflow } from "@/app/types/workflow";
 
 const route = useRoute();
 
@@ -237,11 +238,13 @@ const totalPages = ref(0);
 const modelConfigs = ref<ModelConfig[]>([]);
 const officialModels = ref<OfficialModelConfig[]>([]);
 const knowledgeBases = ref<KnowledgeBase[]>([]);
+const workflows = ref<Workflow[]>([]);
 const loading = ref(false);
 const saving = ref(false);
 const deleting = ref(false);
 const submitError = ref("");
 const selectedId = ref<number | null>(null);
+let loadController: AbortController | null = null;
 
 const bindingOptions = [
   { label: "用户模型", value: "USER_MODEL", description: "使用当前租户下自己配置的聊天模型。" },
@@ -256,6 +259,7 @@ const form = reactive({
   modelConfigId: "",
   officialModelConfigId: "",
   knowledgeBaseId: "",
+  workflowId: "",
   contextWindowSize: "12",
   memoryEnabled: true,
   memoryUpdateMessageThreshold: "6",
@@ -297,6 +301,14 @@ const knowledgeBaseOptions = computed(() => [
     }))
 ]);
 
+const workflowOptions = computed(() => [
+  { label: "暂不绑定工作流", value: "" },
+  ...workflows.value.map((item) => ({
+    label: item.enabled ? item.name : `${item.name} · 已停用`,
+    value: String(item.id)
+  }))
+]);
+
 const knowledgeBaseHint = computed(() =>
   knowledgeBases.value.some((item) => item.enabled)
     ? "绑定后，聊天工作台会在提问前先执行知识检索。"
@@ -311,6 +323,7 @@ function resetForm() {
   form.modelConfigId = "";
   form.officialModelConfigId = "";
   form.knowledgeBaseId = "";
+  form.workflowId = "";
   form.contextWindowSize = "12";
   form.memoryEnabled = true;
   form.memoryUpdateMessageThreshold = "6";
@@ -351,6 +364,7 @@ function selectAgent(agent: Agent) {
   form.modelConfigId = agent.modelConfigId ? String(agent.modelConfigId) : "";
   form.officialModelConfigId = agent.officialModelConfigId ? String(agent.officialModelConfigId) : "";
   form.knowledgeBaseId = agent.knowledgeBaseId ? String(agent.knowledgeBaseId) : "";
+  form.workflowId = agent.workflowId ? String(agent.workflowId) : "";
   form.contextWindowSize = String(agent.contextWindowSize ?? 12);
   form.memoryEnabled = agent.memoryEnabled;
   form.memoryUpdateMessageThreshold = agent.memoryUpdateMessageThreshold ? String(agent.memoryUpdateMessageThreshold) : "6";
@@ -364,16 +378,22 @@ function selectAgent(agent: Agent) {
 }
 
 function parseRequiredInt(value: string) {
-  return Number.parseInt(value.trim(), 10);
+  const normalized = value.trim();
+  return /^\d+$/.test(normalized) ? Number(normalized) : Number.NaN;
 }
 
 function validate() {
   errors.name = form.name.trim() ? "" : "请输入 Agent 名称";
   errors.systemPrompt = form.systemPrompt.trim() ? "" : "请输入系统提示词";
   errors.modelBinding = "";
-  errors.contextWindowSize = Number.isFinite(parseRequiredInt(form.contextWindowSize)) ? "" : "请输入上下文窗口大小";
-  errors.memoryUpdateMessageThreshold = form.memoryEnabled && !Number.isFinite(parseRequiredInt(form.memoryUpdateMessageThreshold))
-    ? "请输入记忆刷新阈值"
+  const contextWindowSize = parseRequiredInt(form.contextWindowSize);
+  const memoryThreshold = parseRequiredInt(form.memoryUpdateMessageThreshold);
+  errors.contextWindowSize = Number.isInteger(contextWindowSize) && contextWindowSize >= 1 && contextWindowSize <= 100
+    ? ""
+    : "上下文窗口必须是 1 到 100 的整数";
+  errors.memoryUpdateMessageThreshold = form.memoryEnabled
+    && !(Number.isInteger(memoryThreshold) && memoryThreshold >= 1 && memoryThreshold <= 100)
+    ? "记忆刷新阈值必须是 1 到 100 的整数"
     : "";
 
   if (form.chatModelBindingType === "USER_MODEL" && !form.modelConfigId) {
@@ -388,39 +408,60 @@ function validate() {
 
 async function loadAgents(newPage?: number) {
   if (newPage !== undefined) page.value = newPage;
+  loadController?.abort();
+  const controller = new AbortController();
+  loadController = controller;
+  const requestedPage = page.value;
   loading.value = true;
   try {
-    const result = await listAgents(page.value, pageSize);
+    const result = await listAgents(requestedPage, pageSize, controller.signal);
+    if (controller.signal.aborted || requestedPage !== page.value) return;
     agents.value = result.items;
     total.value = result.total;
     totalPages.value = result.totalPages;
   } catch (error) {
-    submitError.value = extractApiErrorMessage(error, "加载 Agent 失败");
+    if (!isRequestCanceled(error)) {
+      submitError.value = extractApiErrorMessage(error, "加载 Agent 失败");
+    }
   } finally {
-    loading.value = false;
+    if (loadController === controller) {
+      loading.value = false;
+      loadController = null;
+    }
   }
 }
 
 async function loadAll() {
   page.value = 0;
+  loadController?.abort();
+  const controller = new AbortController();
+  loadController = controller;
   loading.value = true;
   try {
-    const [agentResult, modelConfigList, officialModelList, knowledgeBaseList] = await Promise.all([
-      listAgents(0, pageSize),
-      listModelConfigs(0, 999),
-      listOfficialModelConfigs(0, 999),
-      listKnowledgeBases(0, 999)
+    const [agentResult, modelConfigList, officialModelList, knowledgeBaseList, workflowList] = await Promise.all([
+      listAgents(0, pageSize, controller.signal),
+      fetchAllPages((pageNumber, size) => listModelConfigs(pageNumber, size, controller.signal)),
+      fetchAllPages((pageNumber, size) => listOfficialModelConfigs(pageNumber, size, controller.signal)),
+      fetchAllPages((pageNumber, size) => listKnowledgeBases(pageNumber, size, controller.signal)),
+      fetchAllPages((pageNumber, size) => listWorkflows(pageNumber, size, controller.signal))
     ]);
+    if (controller.signal.aborted) return;
     agents.value = agentResult.items;
     total.value = agentResult.total;
     totalPages.value = agentResult.totalPages;
-    modelConfigs.value = modelConfigList.items;
-    officialModels.value = officialModelList.items;
-    knowledgeBases.value = knowledgeBaseList.items;
+    modelConfigs.value = modelConfigList;
+    officialModels.value = officialModelList;
+    knowledgeBases.value = knowledgeBaseList;
+    workflows.value = workflowList;
   } catch (error) {
-    submitError.value = extractApiErrorMessage(error, "加载 Agent 失败");
+    if (!isRequestCanceled(error)) {
+      submitError.value = extractApiErrorMessage(error, "加载 Agent 失败");
+    }
   } finally {
-    loading.value = false;
+    if (loadController === controller) {
+      loading.value = false;
+      loadController = null;
+    }
   }
 }
 
@@ -451,7 +492,10 @@ async function submit() {
     };
 
     if (selectedId.value) {
-      const updated = await updateAgent(selectedId.value, payload);
+      const updated = await updateAgent(selectedId.value, {
+        ...payload,
+        workflowId: form.workflowId ? Number(form.workflowId) : null
+      });
       await loadAll();
       selectAgent(updated);
     } else {
@@ -494,4 +538,6 @@ onMounted(async () => {
     startCreate();
   }
 });
+
+onBeforeUnmount(() => loadController?.abort());
 </script>

@@ -4,14 +4,12 @@
       <div class="rounded-[24px] border border-line bg-white p-6 lg:p-7">
         <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">开始使用</div>
         <h1 class="mt-3 text-3xl font-semibold tracking-tight text-ink">创建你的 EnjoyAgent 工作台</h1>
-        <p class="mt-3 text-sm leading-6 text-muted">
-          注册成功后会自动创建默认租户，并直接登录进入工作台。
-        </p>
 
-        <form class="mt-8 space-y-5" @submit.prevent="submit">
+        <form class="mt-6 space-y-5" @submit.prevent="submit">
           <UiTextField
             v-model="form.displayName"
             label="显示名称"
+            autocomplete="name"
             placeholder="例如：小陈"
             :error="fieldErrors.displayName"
           />
@@ -24,6 +22,7 @@
           <UiTextField
             v-model="form.email"
             label="邮箱"
+            autocomplete="email"
             placeholder="alice@example.com"
             :error="fieldErrors.email"
           />
@@ -31,11 +30,12 @@
             v-model="form.password"
             label="密码"
             type="password"
+            autocomplete="new-password"
             placeholder="至少 8 位字符"
             :error="fieldErrors.password"
           />
 
-          <div v-if="submitError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+          <div v-if="submitError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600" role="alert">
             {{ submitError }}
           </div>
 

@@ -4,7 +4,7 @@
       <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">404</div>
       <h1 class="mt-3 text-3xl font-semibold tracking-tight text-ink">页面不存在</h1>
       <p class="mt-3 text-sm leading-6 text-muted">
-        这个地址还没有被接入当前前端阶段。你可以先回到工作台继续查看基础布局和认证链路。
+        请检查访问地址，或返回工作台。
       </p>
       <div class="mt-8 flex justify-center gap-3">
         <RouterLink class="rounded-full bg-accent px-5 py-3 text-sm font-semibold text-white shadow-card" to="/app/home">

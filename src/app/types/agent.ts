@@ -15,6 +15,8 @@ export interface Agent {
   officialModelConfigName: string | null;
   knowledgeBaseId: number | null;
   knowledgeBaseName: string | null;
+  workflowId: number | null;
+  workflowName: string | null;
   rerankEnabled: boolean;
   rerankModelConfigId: number | null;
   rerankModelConfigName: string | null;
@@ -50,4 +52,5 @@ export interface UpdateAgentPayload extends CreateAgentPayload {
   rerankEnabled: boolean;
   memoryEnabled: boolean;
   enabled: boolean;
+  workflowId: number | null;
 }

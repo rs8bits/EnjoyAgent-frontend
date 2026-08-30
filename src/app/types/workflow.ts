@@ -12,6 +12,7 @@ export interface Workflow {
 
 export interface WorkflowNodeItem {
   id?: number;
+  nodeKey: string;
   name: string;
   nodeType: string;
   configJson: string;
@@ -36,6 +37,7 @@ export interface WorkflowCanvas {
 export interface SaveCanvasPayload {
   nodes: {
     name: string;
+    nodeKey: string;
     nodeType: string;
     configJson: string;
     positionX: number;

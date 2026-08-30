@@ -2,11 +2,8 @@
   <div class="ea-scroll flex h-full min-h-0 flex-col overflow-y-auto p-5 lg:p-6">
     <div class="mb-5 flex flex-col gap-5 border-b border-line pb-5 lg:flex-row lg:items-center lg:justify-between">
       <div>
-        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">阶段 5 · 知识库模块</div>
-        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">把知识真正接入你的 Agent</h1>
-        <p class="mt-2 max-w-3xl text-sm leading-6 text-muted">
-          这里已经接上真实的知识库、文档上传和文档状态接口。你可以先创建知识库，再上传文件，最后把它绑定到 Agent 上走通完整 RAG 主链。
-        </p>
+        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">知识库</div>
+        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">知识库管理</h1>
       </div>
 
       <div class="flex flex-wrap items-center gap-3 rounded-full border border-line bg-white px-4 py-3 shadow-card">
@@ -127,18 +124,13 @@
               :rows="4"
             />
 
-            <div class="grid gap-3 md:grid-cols-2">
-              <UiCheckbox
-                v-model="form.enabled"
-                label="启用知识库"
-                hint="停用后不会参与 Agent 运行时检索。"
-              />
-              <div class="rounded-[18px] border border-line bg-canvas px-4 py-4 text-sm leading-6 text-muted">
-                当前知识库创建后会直接接入真实上传链路，文档上传成功后会同步完成文本提取、切片和向量化。
-              </div>
-            </div>
+            <UiCheckbox
+              v-model="form.enabled"
+              label="启用知识库"
+              hint="停用后不会参与 Agent 运行时检索。"
+            />
 
-            <div v-if="submitError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+            <div v-if="submitError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600" role="alert">
               {{ submitError }}
             </div>
 
@@ -174,7 +166,6 @@
             class="min-h-0 overflow-hidden"
             eyebrow="步骤 2"
             title="上传文档并查看状态"
-            description="支持批量上传。每个文档上传后会同步完成抽取、切片、向量化和检索索引。"
           >
             <div class="flex h-full min-h-0 flex-col">
               <div
@@ -196,7 +187,7 @@
                         <div class="mt-1 text-sm text-muted">
                           {{
                             selectedKnowledgeBaseId
-                              ? "当前版本支持 TXT、Markdown、PDF。文档会直接导入当前知识库，并同步生成可检索切片。"
+                              ? "支持 TXT、Markdown、PDF，单个文件最大 20 MB。"
                               : "请先在上方创建或选择知识库，然后再上传文档。"
                           }}
                         </div>
@@ -216,6 +207,9 @@
                   <div class="flex flex-col items-start gap-3 lg:items-end">
                     <UiButton :disabled="uploading || !selectedKnowledgeBaseId" @click="openFilePicker">
                       {{ uploading ? "上传中..." : "选择文件" }}
+                    </UiButton>
+                    <UiButton v-if="uploading" variant="ghost" @click="cancelUpload">
+                      取消本批上传
                     </UiButton>
                     <div v-if="uploadingFileNames.length" class="rounded-2xl border border-white/80 bg-white/80 px-4 py-3 text-sm text-ink shadow-sm">
                       {{ uploadingFileNames.join("、") }}
@@ -286,10 +280,23 @@
                           更新时间 {{ formatDateTime(document.updatedAt) }}
                         </span>
                       </div>
+                      <p v-if="document.status === 'FAILED' && document.lastErrorMessage" class="mt-3 text-sm text-rose-600" role="alert">
+                        {{ document.lastErrorCode ? `${document.lastErrorCode}：` : "" }}{{ document.lastErrorMessage }}
+                      </p>
                     </div>
 
                     <div class="flex flex-wrap gap-2">
                       <UiButton
+                        v-if="document.status === 'FAILED'"
+                        type="button"
+                        variant="secondary"
+                        :disabled="processingDocumentId === document.id || !selectedKnowledgeBaseId"
+                        @click="retryDocument(document.id)"
+                      >
+                        {{ processingDocumentId === document.id ? "重试中..." : "重试导入" }}
+                      </UiButton>
+                      <UiButton
+                        v-else
                         type="button"
                         variant="secondary"
                         :disabled="processingDocumentId === document.id || document.status !== 'READY' || !selectedKnowledgeBaseId"
@@ -300,7 +307,7 @@
                       <UiButton
                         type="button"
                         variant="ghost"
-                        :disabled="processingDocumentId === document.id || !selectedKnowledgeBaseId"
+                        :disabled="processingDocumentId === document.id || document.status === 'DELETING' || !selectedKnowledgeBaseId"
                         @click="removeDocument(document.id, document.fileName)"
                       >
                         删除文档
@@ -368,7 +375,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { FileUp } from "lucide-vue-next";
 import SectionCard from "@/app/components/SectionCard.vue";
@@ -378,7 +385,7 @@ import UiPagination from "@/app/components/ui/UiPagination.vue";
 import UiSelect from "@/app/components/ui/UiSelect.vue";
 import UiTextarea from "@/app/components/ui/UiTextarea.vue";
 import UiTextField from "@/app/components/ui/UiTextField.vue";
-import { extractApiErrorMessage } from "@/app/services/http";
+import { extractApiErrorMessage, isRequestCanceled } from "@/app/services/http";
 import {
   createKnowledgeBase,
   deleteKnowledgeBase,
@@ -386,10 +393,12 @@ import {
   listKnowledgeBases,
   listKnowledgeDocuments,
   reindexKnowledgeDocument,
+  retryKnowledgeDocument,
   updateKnowledgeBase,
   uploadKnowledgeDocument
 } from "@/app/services/knowledge";
 import { listModelConfigs } from "@/app/services/models";
+import { fetchAllPages } from "@/app/services/pagination";
 import type { ModelConfig } from "@/app/types/model";
 import type { KnowledgeBase, KnowledgeDocument } from "@/app/types/knowledge";
 
@@ -424,6 +433,12 @@ const submitError = ref("");
 const dragging = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
 const uploadingFileNames = ref<string[]>([]);
+let documentLoadController: AbortController | null = null;
+let knowledgeBaseLoadController: AbortController | null = null;
+let uploadController: AbortController | null = null;
+let componentActive = false;
+let documentPollTimer: number | null = null;
+let documentPollAttempt = 0;
 
 const form = reactive({
   name: "",
@@ -439,6 +454,8 @@ const errors = reactive({
 
 const fileTypes = ["TXT", "Markdown", "PDF"];
 const supportedFileExtensions = new Set(["txt", "md", "markdown", "pdf"]);
+const maxUploadFileBytes = 20 * 1024 * 1024;
+const maxBatchFiles = 20;
 
 const selectedKnowledgeBase = computed(() =>
   knowledgeBases.value.find((item) => item.id === selectedKnowledgeBaseId.value) ?? null
@@ -482,14 +499,26 @@ function formatFileSize(bytes: number | null | undefined) {
 }
 
 function documentStatusLabel(status: string) {
+  if (status === "QUEUED") {
+    return "等待处理";
+  }
   if (status === "READY") {
     return "已就绪";
   }
   if (status === "PROCESSING") {
     return "处理中";
   }
+  if (status === "RETRYING") {
+    return "等待重试";
+  }
+  if (status === "INDEXING") {
+    return "建立索引";
+  }
   if (status === "FAILED") {
     return "处理失败";
+  }
+  if (status === "DELETING") {
+    return "删除中";
   }
   return status;
 }
@@ -498,7 +527,7 @@ function documentStatusClass(status: string) {
   if (status === "READY") {
     return "bg-emerald-50 text-emerald-600";
   }
-  if (status === "PROCESSING") {
+  if (["QUEUED", "PROCESSING", "RETRYING", "INDEXING", "DELETING"].includes(status)) {
     return "bg-amber-50 text-amber-600";
   }
   if (status === "FAILED") {
@@ -536,6 +565,7 @@ function resetErrors() {
 }
 
 function startCreate() {
+  stopDocumentPolling();
   selectedKnowledgeBaseId.value = null;
   documents.value = [];
   syncForm(null);
@@ -543,6 +573,7 @@ function startCreate() {
 }
 
 function selectKnowledgeBase(knowledgeBase: KnowledgeBase) {
+  stopDocumentPolling();
   selectedKnowledgeBaseId.value = knowledgeBase.id;
   syncForm(knowledgeBase);
   resetErrors();
@@ -561,30 +592,45 @@ function validateKnowledgeBaseForm() {
 
 async function loadKnowledgeBasesList(newPage?: number) {
   if (newPage !== undefined) kbPage.value = newPage;
+  knowledgeBaseLoadController?.abort();
+  const controller = new AbortController();
+  knowledgeBaseLoadController = controller;
+  const requestedPage = kbPage.value;
   loading.value = true;
   try {
-    const result = await listKnowledgeBases(kbPage.value, kbPageSize);
+    const result = await listKnowledgeBases(requestedPage, kbPageSize, controller.signal);
+    if (controller.signal.aborted || requestedPage !== kbPage.value) return;
     knowledgeBases.value = result.items;
     kbTotal.value = result.total;
     kbTotalPages.value = result.totalPages;
   } catch (error) {
-    submitError.value = extractApiErrorMessage(error, "加载知识库失败");
+    if (!isRequestCanceled(error)) {
+      submitError.value = extractApiErrorMessage(error, "加载知识库失败");
+    }
   } finally {
-    loading.value = false;
+    if (knowledgeBaseLoadController === controller) {
+      loading.value = false;
+      knowledgeBaseLoadController = null;
+    }
   }
 }
 
 async function loadKnowledgeBaseResources() {
+  knowledgeBaseLoadController?.abort();
+  const controller = new AbortController();
+  knowledgeBaseLoadController = controller;
   loading.value = true;
   try {
-    const [knowledgeBaseResult, modelConfigList] = await Promise.all([
-      listKnowledgeBases(0, kbPageSize),
-      listModelConfigs(0, 999)
+    const [knowledgeBaseResult, allModelConfigs] = await Promise.all([
+      listKnowledgeBases(0, kbPageSize, controller.signal),
+      fetchAllPages((page, size) => listModelConfigs(page, size, controller.signal))
     ]);
+    if (controller.signal.aborted) return;
+    kbPage.value = 0;
     knowledgeBases.value = knowledgeBaseResult.items;
     kbTotal.value = knowledgeBaseResult.total;
     kbTotalPages.value = knowledgeBaseResult.totalPages;
-    modelConfigs.value = modelConfigList.items;
+    modelConfigs.value = allModelConfigs;
 
     const queryKnowledgeBaseId = parseRouteKnowledgeBaseId();
     const activeKnowledgeBaseId = selectedKnowledgeBaseId.value && knowledgeBases.value.some((item) => item.id === selectedKnowledgeBaseId.value)
@@ -604,30 +650,89 @@ async function loadKnowledgeBaseResources() {
       syncForm(null);
     }
   } catch (error) {
-    submitError.value = extractApiErrorMessage(error, "加载知识库失败");
+    if (!isRequestCanceled(error)) {
+      submitError.value = extractApiErrorMessage(error, "加载知识库失败");
+    }
   } finally {
-    loading.value = false;
+    if (knowledgeBaseLoadController === controller) {
+      loading.value = false;
+      knowledgeBaseLoadController = null;
+    }
   }
 }
 
 async function loadDocuments(newPage?: number) {
   if (newPage !== undefined) docPage.value = newPage;
+  stopDocumentPolling(false);
   if (!selectedKnowledgeBaseId.value) {
     documents.value = [];
     return;
   }
 
+  documentLoadController?.abort();
+  const controller = new AbortController();
+  documentLoadController = controller;
+  const requestedKnowledgeBaseId = selectedKnowledgeBaseId.value;
+  const requestedPage = docPage.value;
   documentsLoading.value = true;
   try {
-    const result = await listKnowledgeDocuments(selectedKnowledgeBaseId.value, docPage.value, docPageSize);
+    const result = await listKnowledgeDocuments(
+      requestedKnowledgeBaseId,
+      requestedPage,
+      docPageSize,
+      controller.signal
+    );
+    if (controller.signal.aborted
+      || requestedKnowledgeBaseId !== selectedKnowledgeBaseId.value
+      || requestedPage !== docPage.value) {
+      return;
+    }
     documents.value = result.items;
     docTotal.value = result.total;
     docTotalPages.value = result.totalPages;
+    if (documents.value.some((document) => isTransientDocumentStatus(document.status))) {
+      scheduleDocumentPoll();
+    } else {
+      documentPollAttempt = 0;
+    }
   } catch (error) {
-    submitError.value = extractApiErrorMessage(error, "加载文档列表失败");
+    if (!isRequestCanceled(error)) {
+      submitError.value = extractApiErrorMessage(error, "加载文档列表失败");
+    }
   } finally {
-    documentsLoading.value = false;
+    if (documentLoadController === controller) {
+      documentsLoading.value = false;
+      documentLoadController = null;
+    }
   }
+}
+
+function isTransientDocumentStatus(status: KnowledgeDocument["status"]) {
+  return status === "QUEUED"
+    || status === "PROCESSING"
+    || status === "RETRYING"
+    || status === "INDEXING"
+    || status === "DELETING";
+}
+
+function stopDocumentPolling(abortRequest = true) {
+  if (documentPollTimer !== null) {
+    window.clearTimeout(documentPollTimer);
+    documentPollTimer = null;
+  }
+  if (abortRequest) {
+    documentLoadController?.abort();
+  }
+}
+
+function scheduleDocumentPoll() {
+  stopDocumentPolling(false);
+  const delay = Math.min(1_000 * (2 ** documentPollAttempt), 10_000);
+  documentPollAttempt = Math.min(documentPollAttempt + 1, 4);
+  documentPollTimer = window.setTimeout(() => {
+    documentPollTimer = null;
+    void loadDocuments();
+  }, delay);
 }
 
 async function submitKnowledgeBase() {
@@ -697,26 +802,54 @@ async function uploadFiles(files: File[]) {
 
   const unsupportedFiles = files.filter((file) => !isSupportedKnowledgeFile(file));
   if (unsupportedFiles.length) {
-    submitError.value = `当前版本只支持 TXT、Markdown、PDF。以下文件暂不支持：${unsupportedFiles.map((file) => file.name).join("、")}`;
+    submitError.value = `仅支持 TXT、Markdown、PDF。以下文件暂不支持：${unsupportedFiles.map((file) => file.name).join("、")}`;
+    return;
+  }
+  if (files.length > maxBatchFiles) {
+    submitError.value = `单批最多上传 ${maxBatchFiles} 个文件，请分批重试。`;
+    return;
+  }
+  const oversizedFiles = files.filter((file) => file.size > maxUploadFileBytes);
+  if (oversizedFiles.length) {
+    submitError.value = `单个文件不能超过 20 MB：${oversizedFiles.map((file) => file.name).join("、")}`;
     return;
   }
 
+  uploadController?.abort();
+  const controller = new AbortController();
+  uploadController = controller;
+  const targetKnowledgeBaseId = selectedKnowledgeBaseId.value;
   uploading.value = true;
   submitError.value = "";
   uploadingFileNames.value = files.map((file) => file.name);
 
   try {
     for (const file of files) {
-      await uploadKnowledgeDocument(selectedKnowledgeBaseId.value, file);
+      await uploadKnowledgeDocument(targetKnowledgeBaseId, file, controller.signal);
     }
-    await loadDocuments();
-    await loadKnowledgeBaseResources();
+    if (selectedKnowledgeBaseId.value === targetKnowledgeBaseId) {
+      await loadDocuments();
+    }
+    await loadKnowledgeBasesList();
   } catch (error) {
-    submitError.value = extractApiErrorMessage(error, "上传文档失败");
+    if (!isRequestCanceled(error)) {
+      submitError.value = extractApiErrorMessage(error, "上传文档失败");
+    }
   } finally {
-    uploading.value = false;
-    uploadingFileNames.value = [];
+    if (uploadController === controller) {
+      uploading.value = false;
+      uploadingFileNames.value = [];
+      uploadController = null;
+    }
   }
+}
+
+function cancelUpload() {
+  uploadController?.abort();
+  uploadController = null;
+  uploading.value = false;
+  uploadingFileNames.value = [];
+  submitError.value = "已取消本批尚未完成的上传；已经进入队列的文件会继续处理。";
 }
 
 async function reindexDocument(documentId: number) {
@@ -731,6 +864,21 @@ async function reindexDocument(documentId: number) {
     await loadDocuments();
   } catch (error) {
     submitError.value = extractApiErrorMessage(error, "重建索引失败");
+  } finally {
+    processingDocumentId.value = null;
+  }
+}
+
+async function retryDocument(documentId: number) {
+  if (!selectedKnowledgeBaseId.value) return;
+  processingDocumentId.value = documentId;
+  submitError.value = "";
+  try {
+    await retryKnowledgeDocument(selectedKnowledgeBaseId.value, documentId);
+    documentPollAttempt = 0;
+    await loadDocuments();
+  } catch (error) {
+    submitError.value = extractApiErrorMessage(error, "重试文档导入失败");
   } finally {
     processingDocumentId.value = null;
   }
@@ -776,12 +924,15 @@ async function handleDrop(event: DragEvent) {
 }
 
 watch(selectedKnowledgeBaseId, async (value) => {
+  stopDocumentPolling();
+  documentPollAttempt = 0;
   await router.replace({
     query: {
       ...route.query,
       knowledgeBaseId: value ? String(value) : undefined
     }
   });
+  if (!componentActive || value !== selectedKnowledgeBaseId.value) return;
   syncForm(selectedKnowledgeBase.value);
   docPage.value = 0;
   await loadDocuments();
@@ -794,6 +945,14 @@ watch(embeddingModelOptions, (options) => {
 });
 
 onMounted(async () => {
+  componentActive = true;
   await loadKnowledgeBaseResources();
+});
+
+onBeforeUnmount(() => {
+  componentActive = false;
+  stopDocumentPolling();
+  knowledgeBaseLoadController?.abort();
+  uploadController?.abort();
 });
 </script>

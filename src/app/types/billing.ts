@@ -4,7 +4,7 @@ export type RechargeOrderStatus = "PENDING" | "APPROVED" | "REJECTED" | "CANCELL
 
 export interface UserWallet {
   userId: number;
-  balance: string | number;
+  balance: string;
   currency: string;
   status: WalletStatus;
   updatedAt: string;
@@ -13,8 +13,8 @@ export interface UserWallet {
 export interface UserWalletTransaction {
   id: number;
   transactionType: WalletTransactionType;
-  amountDelta: string | number;
-  balanceAfter: string | number;
+  amountDelta: string;
+  balanceAfter: string;
   currency: string;
   referenceType: string | null;
   referenceId: number | null;
@@ -27,7 +27,7 @@ export interface RechargeOrder {
   userId: number;
   userEmail: string;
   userDisplayName: string | null;
-  amount: string | number;
+  amount: string;
   currency: string;
   status: RechargeOrderStatus;
   remark: string | null;
@@ -39,6 +39,6 @@ export interface RechargeOrder {
 }
 
 export interface CreateRechargeOrderPayload {
-  amount: number;
+  amount: string;
   remark?: string;
 }

@@ -8,9 +8,10 @@ import type {
   WorkflowCanvas,
 } from "@/app/types/workflow";
 
-export async function listWorkflows(page = 0, size = 20) {
+export async function listWorkflows(page = 0, size = 20, signal?: AbortSignal) {
   const response = await http.get<ApiResponse<PagedResponse<Workflow>>>("/api/workflows", {
     params: { page, size },
+    signal,
   });
   return extractPagedResponseData(response);
 }
@@ -20,8 +21,8 @@ export async function createWorkflow(payload: CreateWorkflowPayload) {
   return response.data.data;
 }
 
-export async function getWorkflow(id: number) {
-  const response = await http.get<ApiResponse<Workflow>>(`/api/workflows/${id}`);
+export async function getWorkflow(id: number, signal?: AbortSignal) {
+  const response = await http.get<ApiResponse<Workflow>>(`/api/workflows/${id}`, { signal });
   return response.data.data;
 }
 
@@ -34,9 +35,10 @@ export async function deleteWorkflow(id: number) {
   await http.delete<ApiResponse<null>>(`/api/workflows/${id}`);
 }
 
-export async function getCanvas(workflowId: number) {
+export async function getCanvas(workflowId: number, signal?: AbortSignal) {
   const response = await http.get<ApiResponse<WorkflowCanvas>>(
-    `/api/workflows/${workflowId}/canvas`
+    `/api/workflows/${workflowId}/canvas`,
+    { signal }
   );
   return response.data.data;
 }

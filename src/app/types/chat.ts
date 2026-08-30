@@ -71,6 +71,7 @@ export interface CreateChatSessionPayload {
 
 export interface SendChatMessagePayload {
   content: string;
+  toolApprovalTokens?: string[];
 }
 
 export interface ChatStreamStarted {

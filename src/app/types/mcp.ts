@@ -66,6 +66,13 @@ export interface McpToolCallLog {
   createdAt: string;
 }
 
+export interface McpToolApproval {
+  toolId: number;
+  agentId: number;
+  approvalToken: string;
+  expiresAt: string;
+}
+
 export interface McpOAuthAuthorization {
   status: McpOAuthConnectionStatus;
   authorizationUrl: string;

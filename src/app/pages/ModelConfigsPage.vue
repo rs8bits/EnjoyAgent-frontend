@@ -2,11 +2,8 @@
   <div class="ea-scroll h-full overflow-y-auto p-5 lg:p-8">
     <div class="mb-6 flex flex-col gap-4 border-b border-line pb-6 lg:flex-row lg:items-end lg:justify-between">
       <div>
-        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">阶段 3 · 模型配置</div>
-        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">配置可复用模型</h1>
-        <p class="mt-2 max-w-3xl text-sm leading-6 text-muted">
-          模型配置会复用你已经保存的凭证，并成为后面 Agent、知识库和工具链的基础运行资源。
-        </p>
+        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">模型</div>
+        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">模型配置</h1>
       </div>
       <div class="flex flex-wrap items-center gap-3">
         <div class="rounded-full border border-line bg-white px-4 py-2.5 text-sm text-muted shadow-sm">
@@ -17,7 +14,7 @@
     </div>
 
     <div class="grid gap-5 xl:grid-cols-[minmax(0,0.95fr)_minmax(400px,0.85fr)]">
-      <SectionCard eyebrow="模型列表" title="当前租户的模型配置" description="阶段三先把聊天、Embedding、Rerank 模型都纳入统一配置。">
+      <SectionCard eyebrow="模型列表" title="当前租户的模型配置">
         <div v-if="loading" class="rounded-[20px] border border-line bg-canvas px-4 py-10 text-sm text-muted">
           正在加载模型配置...
         </div>
@@ -74,7 +71,6 @@
       <SectionCard
         eyebrow="编辑区"
         :title="selectedId ? '编辑模型配置' : '新建模型配置'"
-        description="阶段三先默认使用用户自己的凭证。官方模型请到“官方模型”页面查看。"
       >
         <form class="space-y-5" @submit.prevent="submit">
           <UiTextField
@@ -89,7 +85,7 @@
               v-model="form.provider"
               label="模型提供方"
               :options="credentialProviderSelectOptions"
-              hint="当前运行时已经支持阿里百炼和 OpenAI 兼容协议。"
+              hint="支持阿里百炼和 OpenAI 兼容协议。"
             />
             <UiSelect
               v-model="form.modelType"
@@ -120,11 +116,13 @@
               label="采样温度"
               placeholder="例如：0.2"
               hint="仅对对话模型更有意义，不填则交给后端默认值。"
+              :error="errors.temperature"
             />
             <UiTextField
               v-model="form.maxTokens"
               label="最大输出 Token"
               placeholder="例如：2048"
+              :error="errors.maxTokens"
             />
           </div>
 
@@ -134,7 +132,7 @@
             hint="停用后不会从历史里消失，但新 Agent 不建议继续绑定。"
           />
 
-          <div v-if="submitError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+          <div v-if="submitError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600" role="alert">
             {{ submitError }}
           </div>
 
@@ -162,7 +160,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import SectionCard from "@/app/components/SectionCard.vue";
 import UiButton from "@/app/components/ui/UiButton.vue";
 import UiCheckbox from "@/app/components/ui/UiCheckbox.vue";
@@ -171,8 +169,9 @@ import UiSelect from "@/app/components/ui/UiSelect.vue";
 import UiTextField from "@/app/components/ui/UiTextField.vue";
 import { credentialProviderOptions, modelTypeOptions } from "@/app/constants/options";
 import { listCredentials } from "@/app/services/credentials";
-import { extractApiErrorMessage } from "@/app/services/http";
+import { extractApiErrorMessage, isRequestCanceled } from "@/app/services/http";
 import { createModelConfig, deleteModelConfig, listModelConfigs, updateModelConfig } from "@/app/services/models";
+import { fetchAllPages } from "@/app/services/pagination";
 import type { Credential } from "@/app/types/credential";
 import type { ModelConfig, ModelType } from "@/app/types/model";
 
@@ -187,6 +186,7 @@ const saving = ref(false);
 const deleting = ref(false);
 const submitError = ref("");
 const selectedId = ref<number | null>(null);
+let loadController: AbortController | null = null;
 
 const credentialProviderSelectOptions = credentialProviderOptions.map((option) => ({ ...option }));
 const modelTypeSelectOptions = modelTypeOptions.map((option) => ({ ...option }));
@@ -205,7 +205,9 @@ const form = reactive({
 const errors = reactive({
   name: "",
   modelName: "",
-  credentialId: ""
+  credentialId: "",
+  temperature: "",
+  maxTokens: ""
 });
 
 const filteredCredentials = computed(() =>
@@ -239,6 +241,8 @@ function resetForm() {
   errors.name = "";
   errors.modelName = "";
   errors.credentialId = "";
+  errors.temperature = "";
+  errors.maxTokens = "";
   submitError.value = "";
 }
 
@@ -260,6 +264,8 @@ function selectModelConfig(item: ModelConfig) {
   errors.name = "";
   errors.modelName = "";
   errors.credentialId = "";
+  errors.temperature = "";
+  errors.maxTokens = "";
   submitError.value = "";
 }
 
@@ -277,40 +283,75 @@ function validate() {
   errors.name = form.name.trim() ? "" : "请输入配置名称";
   errors.modelName = form.modelName.trim() ? "" : "请输入模型名称";
   errors.credentialId = form.credentialId ? "" : "请选择绑定凭证";
-  return !errors.name && !errors.modelName && !errors.credentialId;
+  const temperature = form.temperature.trim();
+  const temperatureNumber = Number(temperature);
+  errors.temperature = !temperature
+    || (/^\d+(?:\.\d+)?$/.test(temperature) && temperatureNumber >= 0 && temperatureNumber <= 2)
+    ? ""
+    : "采样温度必须是 0 到 2 之间的数字";
+  const maxTokens = form.maxTokens.trim();
+  const maxTokensNumber = Number(maxTokens);
+  errors.maxTokens = !maxTokens
+    || (/^\d+$/.test(maxTokens) && maxTokensNumber >= 1 && maxTokensNumber <= 2_147_483_647)
+    ? ""
+    : "最大输出 Token 必须是正整数";
+  return !errors.name
+    && !errors.modelName
+    && !errors.credentialId
+    && !errors.temperature
+    && !errors.maxTokens;
 }
 
 async function loadModelConfigs(newPage?: number) {
   if (newPage !== undefined) page.value = newPage;
+  loadController?.abort();
+  const controller = new AbortController();
+  loadController = controller;
+  const requestedPage = page.value;
   loading.value = true;
   try {
-    const result = await listModelConfigs(page.value, pageSize);
+    const result = await listModelConfigs(requestedPage, pageSize, controller.signal);
+    if (controller.signal.aborted || requestedPage !== page.value) return;
     modelConfigs.value = result.items;
     total.value = result.total;
     totalPages.value = result.totalPages;
   } catch (error) {
-    submitError.value = extractApiErrorMessage(error, "加载模型配置失败");
+    if (!isRequestCanceled(error)) {
+      submitError.value = extractApiErrorMessage(error, "加载模型配置失败");
+    }
   } finally {
-    loading.value = false;
+    if (loadController === controller) {
+      loading.value = false;
+      loadController = null;
+    }
   }
 }
 
 async function loadAll() {
   page.value = 0;
+  loadController?.abort();
+  const controller = new AbortController();
+  loadController = controller;
   loading.value = true;
   try {
     const [credentialList, modelConfigResult] = await Promise.all([
-      listCredentials(0, 999),
-      listModelConfigs(0, pageSize)
+      fetchAllPages((pageNumber, size) => listCredentials(pageNumber, size, controller.signal)),
+      listModelConfigs(0, pageSize, controller.signal)
     ]);
-    credentials.value = credentialList.items;
+    if (controller.signal.aborted) return;
+    credentials.value = credentialList;
     modelConfigs.value = modelConfigResult.items;
     total.value = modelConfigResult.total;
     totalPages.value = modelConfigResult.totalPages;
   } catch (error) {
-    submitError.value = extractApiErrorMessage(error, "加载模型配置失败");
+    if (!isRequestCanceled(error)) {
+      submitError.value = extractApiErrorMessage(error, "加载模型配置失败");
+    }
   } finally {
-    loading.value = false;
+    if (loadController === controller) {
+      loading.value = false;
+      loadController = null;
+    }
   }
 }
 
@@ -375,4 +416,6 @@ async function removeSelected() {
 onMounted(async () => {
   await loadAll();
 });
+
+onBeforeUnmount(() => loadController?.abort());
 </script>

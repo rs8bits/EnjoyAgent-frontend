@@ -23,6 +23,7 @@ export interface CreateOfficialModelCredentialPayload {
 
 export interface UpdateOfficialModelCredentialPayload {
   name: string;
+  provider: CredentialProvider;
   baseUrl: string;
   secretPlaintext?: string;
   enabled: boolean;
@@ -36,8 +37,8 @@ export interface CreateOfficialModelConfigPayload {
   officialCredentialId: number;
   temperature?: number;
   maxTokens?: number;
-  inputPricePerMillion: number;
-  outputPricePerMillion: number;
+  inputPricePerMillion: string;
+  outputPricePerMillion: string;
   currency: string;
   description?: string;
   enabled?: boolean;
@@ -52,7 +53,7 @@ export interface ReviewRemarkPayload {
 }
 
 export interface AdjustUserWalletPayload {
-  amountDelta: number;
+  amountDelta: string;
   description?: string;
 }
 

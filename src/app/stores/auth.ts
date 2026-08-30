@@ -1,86 +1,67 @@
 import { computed, ref } from "vue";
+import axios from "axios";
 import { defineStore } from "pinia";
-import { fetchCurrentUser, login as loginRequest, register as registerRequest } from "@/app/services/auth";
-import { extractApiErrorMessage, setHttpAccessToken } from "@/app/services/http";
+import {
+  fetchCurrentUser,
+  login as loginRequest,
+  logout as logoutRequest,
+  register as registerRequest
+} from "@/app/services/auth";
+import { extractApiErrorMessage } from "@/app/services/http";
 import type { AuthResponse, CurrentUser, LoginPayload, RegisterPayload } from "@/app/types/auth";
 
-const ACCESS_TOKEN_KEY = "enjoyagent.access-token";
-
-function readStoredToken() {
-  if (typeof window === "undefined") {
-    return null;
-  }
-  return window.localStorage.getItem(ACCESS_TOKEN_KEY);
-}
-
-function writeStoredToken(token: string | null) {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  if (token) {
-    window.localStorage.setItem(ACCESS_TOKEN_KEY, token);
-    return;
-  }
-
-  window.localStorage.removeItem(ACCESS_TOKEN_KEY);
-}
-
 export const useAuthStore = defineStore("auth", () => {
-  const accessToken = ref<string | null>(null);
   const currentUser = ref<CurrentUser | null>(null);
   const initialized = ref(false);
   const bootstrapping = ref(false);
-  const hydrated = ref(false);
+  const bootstrapError = ref("");
+  let bootstrapPromise: Promise<void> | null = null;
 
-  const isAuthenticated = computed(() => Boolean(accessToken.value));
+  const isAuthenticated = computed(() => currentUser.value !== null);
   const isAdmin = computed(() => currentUser.value?.systemRole === "ADMIN");
-
-  function hydrate() {
-    if (hydrated.value) {
-      return;
-    }
-    hydrated.value = true;
-    accessToken.value = readStoredToken();
-    setHttpAccessToken(accessToken.value);
-  }
+  const isOwner = computed(() => currentUser.value?.role === "OWNER");
 
   function applyAuth(auth: AuthResponse) {
-    accessToken.value = auth.accessToken;
     currentUser.value = auth.currentUser;
-    writeStoredToken(auth.accessToken);
-    setHttpAccessToken(auth.accessToken);
+    bootstrapError.value = "";
     initialized.value = true;
   }
 
   function clearAuth() {
-    accessToken.value = null;
     currentUser.value = null;
-    writeStoredToken(null);
-    setHttpAccessToken(null);
     initialized.value = true;
   }
 
-  async function bootstrap() {
-    hydrate();
-
-    if (initialized.value || bootstrapping.value) {
+  async function bootstrap(force = false) {
+    if (initialized.value && !force) {
       return;
     }
 
-    if (!accessToken.value) {
-      initialized.value = true;
-      return;
+    if (bootstrapPromise) {
+      return bootstrapPromise;
     }
 
-    bootstrapping.value = true;
+    bootstrapPromise = (async () => {
+      bootstrapping.value = true;
+      bootstrapError.value = "";
+      try {
+        currentUser.value = await fetchCurrentUser();
+      } catch (error) {
+        if (axios.isAxiosError(error) && error.response?.status === 401) {
+          clearAuth();
+        } else {
+          bootstrapError.value = extractApiErrorMessage(error, "暂时无法验证登录状态");
+        }
+      } finally {
+        initialized.value = true;
+        bootstrapping.value = false;
+      }
+    })();
+
     try {
-      currentUser.value = await fetchCurrentUser();
-    } catch {
-      clearAuth();
+      await bootstrapPromise;
     } finally {
-      initialized.value = true;
-      bootstrapping.value = false;
+      bootstrapPromise = null;
     }
   }
 
@@ -105,24 +86,31 @@ export const useAuthStore = defineStore("auth", () => {
   }
 
   async function refreshCurrentUser() {
-    if (!accessToken.value) {
-      currentUser.value = null;
-      return;
-    }
     currentUser.value = await fetchCurrentUser();
   }
 
+  async function logout() {
+    try {
+      await logoutRequest();
+      clearAuth();
+      return { ok: true as const };
+    } catch (error) {
+      return { ok: false as const, message: extractApiErrorMessage(error, "退出登录失败") };
+    }
+  }
+
   return {
-    accessToken,
     currentUser,
     initialized,
     bootstrapping,
+    bootstrapError,
     isAuthenticated,
     isAdmin,
-    hydrate,
+    isOwner,
     bootstrap,
     login,
     register,
+    logout,
     refreshCurrentUser,
     clearAuth
   };

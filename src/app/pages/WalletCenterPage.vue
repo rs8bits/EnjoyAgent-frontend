@@ -2,11 +2,8 @@
   <div class="ea-scroll flex h-full min-h-0 flex-col gap-5 overflow-y-auto p-5 lg:p-8">
     <div class="flex flex-col gap-4 border-b border-line pb-6 lg:flex-row lg:items-end lg:justify-between">
       <div>
-        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">阶段 7 · 钱包中心</div>
-        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">管理余额、流水和充值单</h1>
-        <p class="mt-2 max-w-3xl text-sm leading-6 text-muted">
-          这里已经接入真实的钱包、流水和充值单接口。你可以先查看当前余额，再创建一笔待审核的充值单。
-        </p>
+        <div class="text-xs font-semibold uppercase tracking-[0.22em] text-accent">钱包</div>
+        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-ink">钱包中心</h1>
       </div>
 
       <UiButton variant="secondary" :disabled="loading" @click="loadWalletCenter">
@@ -48,7 +45,7 @@
             当前还没有钱包信息，或者钱包数据加载失败。你可以先刷新一次。
           </div>
 
-          <div v-if="pageError" class="mt-4 rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+          <div v-if="pageError" class="mt-4 rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600" role="alert">
             {{ pageError }}
           </div>
         </SectionCard>
@@ -104,7 +101,7 @@
       </div>
 
       <div class="space-y-5">
-        <SectionCard eyebrow="发起充值" title="创建充值单" description="当前版本是人工审核模式。提交后管理员审核通过，余额才会真正入账。">
+        <SectionCard eyebrow="发起充值" title="创建充值单" description="提交后由管理员审核入账。">
           <form class="space-y-4" @submit.prevent="submitRechargeOrder">
             <UiTextField
               v-model="rechargeForm.amount"
@@ -120,7 +117,7 @@
               :rows="4"
             />
 
-            <div v-if="rechargeError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600">
+            <div v-if="rechargeError" class="rounded-[18px] border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-600" role="alert">
               {{ rechargeError }}
             </div>
 
@@ -177,15 +174,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import SectionCard from "@/app/components/SectionCard.vue";
 import UiButton from "@/app/components/ui/UiButton.vue";
 import UiPagination from "@/app/components/ui/UiPagination.vue";
 import UiTextField from "@/app/components/ui/UiTextField.vue";
 import UiTextarea from "@/app/components/ui/UiTextarea.vue";
 import { createRechargeOrder, listRechargeOrders, listWalletTransactions, getCurrentWallet } from "@/app/services/billing";
-import { extractApiErrorMessage } from "@/app/services/http";
+import { extractApiErrorMessage, isRequestCanceled } from "@/app/services/http";
 import type { RechargeOrder, UserWallet, UserWalletTransaction } from "@/app/types/billing";
+import { compareDecimalStrings, formatDecimalString, isValidDecimalString, normalizeDecimalString } from "@/app/utils/decimal";
 
 const wallet = ref<UserWallet | null>(null);
 const transactions = ref<UserWalletTransaction[]>([]);
@@ -202,6 +200,10 @@ const loading = ref(false);
 const submittingRecharge = ref(false);
 const pageError = ref("");
 const rechargeError = ref("");
+let walletController: AbortController | null = null;
+let transactionController: AbortController | null = null;
+let rechargeController: AbortController | null = null;
+let pageErrorSequence = 0;
 
 const rechargeForm = reactive({
   amount: "",
@@ -229,14 +231,13 @@ function formatDateTime(value: string | null | undefined) {
   });
 }
 
-function formatMoney(value: string | number | null | undefined) {
-  const amount = Number(value ?? 0);
-  return amount.toFixed(2);
+function formatMoney(value: string | null | undefined) {
+  return formatDecimalString(value);
 }
 
-function signedMoney(value: string | number | null | undefined) {
-  const amount = Number(value ?? 0);
-  return `${amount >= 0 ? "+" : ""}${amount.toFixed(2)}`;
+function signedMoney(value: string | null | undefined) {
+  const amount = value ?? "0";
+  return `${compareDecimalStrings(amount, "0") >= 0 ? "+" : ""}${formatDecimalString(amount)}`;
 }
 
 function walletStatusLabel(status: string | null | undefined) {
@@ -291,84 +292,133 @@ function transactionTypeLabel(type: string | null | undefined) {
   return type ?? "未知流水";
 }
 
-function amountClass(value: string | number | null | undefined) {
-  return Number(value ?? 0) >= 0 ? "bg-emerald-50 text-emerald-600" : "bg-rose-50 text-rose-600";
+function amountClass(value: string | null | undefined) {
+  return compareDecimalStrings(value ?? "0", "0") >= 0
+    ? "bg-emerald-50 text-emerald-600"
+    : "bg-rose-50 text-rose-600";
 }
 
 function validateRechargeForm() {
-  const amount = Number(rechargeForm.amount.trim());
-  rechargeErrors.amount = !rechargeForm.amount.trim()
+  const amount = rechargeForm.amount.trim();
+  rechargeErrors.amount = !amount
     ? "请输入充值金额"
-    : Number.isNaN(amount) || amount < 0.01
-      ? "充值金额必须大于等于 0.01"
-      : "";
+    : !isValidDecimalString(amount)
+      ? "金额最多 12 位整数、6 位小数"
+      : compareDecimalStrings(amount, "0.01") < 0
+        ? "充值金额必须大于等于 0.01"
+        : "";
   return !rechargeErrors.amount;
 }
 
 async function loadTransactions(newPage?: number) {
   if (newPage !== undefined) txPage.value = newPage;
+  transactionController?.abort();
+  const controller = new AbortController();
+  transactionController = controller;
+  const requestedPage = txPage.value;
+  const errorSequence = ++pageErrorSequence;
+  pageError.value = "";
   try {
-    const result = await listWalletTransactions(txPage.value, txPageSize);
+    const result = await listWalletTransactions(requestedPage, txPageSize, controller.signal);
+    if (controller.signal.aborted || requestedPage !== txPage.value) return;
     transactions.value = result.items;
     txTotal.value = result.total;
     txTotalPages.value = result.totalPages;
   } catch (error) {
-    pageError.value = extractApiErrorMessage(error, "加载钱包流水失败");
+    if (!isRequestCanceled(error) && errorSequence === pageErrorSequence) {
+      pageError.value = extractApiErrorMessage(error, "加载钱包流水失败");
+    }
+  } finally {
+    if (transactionController === controller) {
+      transactionController = null;
+    }
   }
 }
 
 async function loadRechargeOrders(newPage?: number) {
   if (newPage !== undefined) rechargePage.value = newPage;
+  rechargeController?.abort();
+  const controller = new AbortController();
+  rechargeController = controller;
+  const requestedPage = rechargePage.value;
+  const errorSequence = ++pageErrorSequence;
+  pageError.value = "";
   try {
-    const result = await listRechargeOrders(rechargePage.value, rechargePageSize);
+    const result = await listRechargeOrders(requestedPage, rechargePageSize, controller.signal);
+    if (controller.signal.aborted || requestedPage !== rechargePage.value) return;
     rechargeOrders.value = result.items;
     rechargeTotal.value = result.total;
     rechargeTotalPages.value = result.totalPages;
   } catch (error) {
-    pageError.value = extractApiErrorMessage(error, "加载充值单失败");
+    if (!isRequestCanceled(error) && errorSequence === pageErrorSequence) {
+      pageError.value = extractApiErrorMessage(error, "加载充值单失败");
+    }
+  } finally {
+    if (rechargeController === controller) {
+      rechargeController = null;
+    }
   }
 }
 
 async function loadWalletCenter() {
+  walletController?.abort();
+  transactionController?.abort();
+  rechargeController?.abort();
+  const walletRequest = new AbortController();
+  const transactionRequest = new AbortController();
+  const rechargeRequest = new AbortController();
+  walletController = walletRequest;
+  transactionController = transactionRequest;
+  rechargeController = rechargeRequest;
+  const requestedTxPage = txPage.value;
+  const requestedRechargePage = rechargePage.value;
+  const errorSequence = ++pageErrorSequence;
   loading.value = true;
   pageError.value = "";
   try {
     const [walletResult, transactionResult, orderResult] = await Promise.allSettled([
-      getCurrentWallet(),
-      listWalletTransactions(txPage.value, txPageSize),
-      listRechargeOrders(rechargePage.value, rechargePageSize)
+      getCurrentWallet(walletRequest.signal),
+      listWalletTransactions(requestedTxPage, txPageSize, transactionRequest.signal),
+      listRechargeOrders(requestedRechargePage, rechargePageSize, rechargeRequest.signal)
     ]);
 
     const errors: string[] = [];
 
-    if (walletResult.status === "fulfilled") {
+    if (walletController === walletRequest && walletResult.status === "fulfilled") {
       wallet.value = walletResult.value;
-    } else {
+    } else if (walletController === walletRequest && !isRequestCanceled(walletResult.status === "rejected" ? walletResult.reason : undefined)) {
       wallet.value = null;
-      errors.push(extractApiErrorMessage(walletResult.reason, "加载钱包信息失败"));
+      if (walletResult.status === "rejected") {
+        errors.push(extractApiErrorMessage(walletResult.reason, "加载钱包信息失败"));
+      }
     }
 
-    if (transactionResult.status === "fulfilled") {
+    if (transactionController === transactionRequest && requestedTxPage === txPage.value && transactionResult.status === "fulfilled") {
       transactions.value = transactionResult.value.items;
       txTotal.value = transactionResult.value.total;
       txTotalPages.value = transactionResult.value.totalPages;
-    } else {
+    } else if (transactionController === transactionRequest && transactionResult.status === "rejected" && !isRequestCanceled(transactionResult.reason)) {
       transactions.value = [];
       errors.push(extractApiErrorMessage(transactionResult.reason, "加载钱包流水失败"));
     }
 
-    if (orderResult.status === "fulfilled") {
+    if (rechargeController === rechargeRequest && requestedRechargePage === rechargePage.value && orderResult.status === "fulfilled") {
       rechargeOrders.value = orderResult.value.items;
       rechargeTotal.value = orderResult.value.total;
       rechargeTotalPages.value = orderResult.value.totalPages;
-    } else {
+    } else if (rechargeController === rechargeRequest && orderResult.status === "rejected" && !isRequestCanceled(orderResult.reason)) {
       rechargeOrders.value = [];
       errors.push(extractApiErrorMessage(orderResult.reason, "加载充值单失败"));
     }
 
-    pageError.value = errors[0] ?? "";
+    if (errorSequence === pageErrorSequence) {
+      pageError.value = errors[0] ?? "";
+    }
   } finally {
-    loading.value = false;
+    if (walletController === walletRequest) walletController = null;
+    if (transactionController === transactionRequest) transactionController = null;
+    if (rechargeController === rechargeRequest) rechargeController = null;
+    if (!walletController) loading.value = false;
   }
 }
 
@@ -381,7 +431,7 @@ async function submitRechargeOrder() {
   submittingRecharge.value = true;
   try {
     await createRechargeOrder({
-      amount: Number(rechargeForm.amount.trim()),
+      amount: normalizeDecimalString(rechargeForm.amount),
       remark: rechargeForm.remark.trim() || undefined
     });
     rechargeForm.amount = "";
@@ -395,4 +445,10 @@ async function submitRechargeOrder() {
 }
 
 onMounted(loadWalletCenter);
+
+onBeforeUnmount(() => {
+  walletController?.abort();
+  transactionController?.abort();
+  rechargeController?.abort();
+});
 </script>

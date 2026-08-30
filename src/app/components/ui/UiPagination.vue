@@ -1,12 +1,17 @@
 <template>
-  <div v-if="totalPages > 1" class="flex items-center justify-between gap-4 py-3">
+  <nav
+    v-if="totalPages > 1"
+    class="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between"
+    aria-label="分页导航"
+  >
     <div class="text-sm text-muted">
       共 {{ total }} 条，第 {{ page + 1 }} / {{ totalPages }} 页
     </div>
-    <div class="flex items-center gap-2">
+    <div class="flex flex-wrap items-center gap-1 sm:justify-end sm:gap-2">
       <UiButton
         variant="ghost"
         :disabled="page <= 0"
+        aria-label="转到第一页"
         @click="$emit('change', 0)"
       >
         首页
@@ -14,6 +19,7 @@
       <UiButton
         variant="ghost"
         :disabled="page <= 0"
+        aria-label="转到上一页"
         @click="$emit('change', page - 1)"
       >
         上一页
@@ -27,6 +33,8 @@
           :class="p === page
             ? 'bg-accent text-white shadow-sm'
             : 'text-muted hover:bg-accent-soft hover:text-accent'"
+          :aria-label="`转到第 ${p + 1} 页`"
+          :aria-current="p === page ? 'page' : undefined"
           @click="$emit('change', p)"
         >
           {{ p + 1 }}
@@ -35,6 +43,7 @@
       <UiButton
         variant="ghost"
         :disabled="page >= totalPages - 1"
+        aria-label="转到下一页"
         @click="$emit('change', page + 1)"
       >
         下一页
@@ -42,12 +51,13 @@
       <UiButton
         variant="ghost"
         :disabled="page >= totalPages - 1"
+        aria-label="转到最后一页"
         @click="$emit('change', totalPages - 1)"
       >
         末页
       </UiButton>
     </div>
-  </div>
+  </nav>
 </template>
 
 <script setup lang="ts">
@@ -69,7 +79,7 @@ const visiblePages = computed(() => {
   const maxVisible = 5;
   const half = Math.floor(maxVisible / 2);
   let start = Math.max(0, props.page - half);
-  let end = Math.min(props.totalPages, start + maxVisible);
+  const end = Math.min(props.totalPages, start + maxVisible);
   if (end - start < maxVisible) {
     start = Math.max(0, end - maxVisible);
   }

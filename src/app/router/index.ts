@@ -3,24 +3,25 @@ import AuthLayout from "@/app/layouts/AuthLayout.vue";
 import AppWorkspaceLayout from "@/app/layouts/AppWorkspaceLayout.vue";
 import pinia from "@/app/stores/pinia";
 import { useAuthStore } from "@/app/stores/auth";
-import AdminOverviewPage from "@/app/pages/AdminOverviewPage.vue";
-import AdminOfficialModelsPage from "@/app/pages/AdminOfficialModelsPage.vue";
-import AdminReviewCenterPage from "@/app/pages/AdminReviewCenterPage.vue";
-import AgentsPage from "@/app/pages/AgentsPage.vue";
-import ChatPreviewPage from "@/app/pages/ChatPreviewPage.vue";
-import CredentialsPage from "@/app/pages/CredentialsPage.vue";
-import KnowledgeImportPage from "@/app/pages/KnowledgeImportPage.vue";
-import LoginPage from "@/app/pages/LoginPage.vue";
-import McpWorkbenchPage from "@/app/pages/McpWorkbenchPage.vue";
-import ModelConfigsPage from "@/app/pages/ModelConfigsPage.vue";
-import MarketHubPage from "@/app/pages/MarketHubPage.vue";
-import NotFoundPage from "@/app/pages/NotFoundPage.vue";
-import OfficialModelsPage from "@/app/pages/OfficialModelsPage.vue";
-import RegisterPage from "@/app/pages/RegisterPage.vue";
-import WalletCenterPage from "@/app/pages/WalletCenterPage.vue";
-import WorkflowCanvasPage from "@/app/pages/WorkflowCanvasPage.vue";
-import WorkflowsPage from "@/app/pages/WorkflowsPage.vue";
-import WorkspaceHomePage from "@/app/pages/WorkspaceHomePage.vue";
+
+const AdminOverviewPage = () => import("@/app/pages/AdminOverviewPage.vue");
+const AdminOfficialModelsPage = () => import("@/app/pages/AdminOfficialModelsPage.vue");
+const AdminReviewCenterPage = () => import("@/app/pages/AdminReviewCenterPage.vue");
+const AgentsPage = () => import("@/app/pages/AgentsPage.vue");
+const ChatPreviewPage = () => import("@/app/pages/ChatPreviewPage.vue");
+const CredentialsPage = () => import("@/app/pages/CredentialsPage.vue");
+const KnowledgeImportPage = () => import("@/app/pages/KnowledgeImportPage.vue");
+const LoginPage = () => import("@/app/pages/LoginPage.vue");
+const McpWorkbenchPage = () => import("@/app/pages/McpWorkbenchPage.vue");
+const ModelConfigsPage = () => import("@/app/pages/ModelConfigsPage.vue");
+const MarketHubPage = () => import("@/app/pages/MarketHubPage.vue");
+const NotFoundPage = () => import("@/app/pages/NotFoundPage.vue");
+const OfficialModelsPage = () => import("@/app/pages/OfficialModelsPage.vue");
+const RegisterPage = () => import("@/app/pages/RegisterPage.vue");
+const WalletCenterPage = () => import("@/app/pages/WalletCenterPage.vue");
+const WorkflowCanvasPage = () => import("@/app/pages/WorkflowCanvasPage.vue");
+const WorkflowsPage = () => import("@/app/pages/WorkflowsPage.vue");
+const WorkspaceHomePage = () => import("@/app/pages/WorkspaceHomePage.vue");
 
 const router = createRouter({
   history: createWebHistory(),
@@ -66,13 +67,13 @@ const router = createRouter({
           path: "knowledge",
           name: "knowledge",
           component: KnowledgeImportPage,
-          meta: { requiresAuth: true, title: "知识库管理" }
+          meta: { requiresAuth: true, requiresOwner: true, title: "知识库管理" }
         },
         {
           path: "mcp",
           name: "mcp-workbench",
           component: McpWorkbenchPage,
-          meta: { requiresAuth: true, title: "MCP 工具" }
+          meta: { requiresAuth: true, requiresOwner: true, title: "MCP 工具" }
         },
         {
           path: "wallet",
@@ -90,13 +91,13 @@ const router = createRouter({
           path: "workflows",
           name: "workflows",
           component: WorkflowsPage,
-          meta: { requiresAuth: true, title: "工作流" }
+          meta: { requiresAuth: true, requiresOwner: true, title: "工作流" }
         },
         {
           path: "workflows/:id/canvas",
           name: "workflow-canvas",
           component: WorkflowCanvasPage,
-          meta: { requiresAuth: true, title: "工作流编辑" }
+          meta: { requiresAuth: true, requiresOwner: true, title: "工作流编辑" }
         },
         {
           path: "knowledge/import",
@@ -112,7 +113,7 @@ const router = createRouter({
           path: "model-configs",
           name: "model-configs",
           component: ModelConfigsPage,
-          meta: { requiresAuth: true, title: "模型配置" }
+          meta: { requiresAuth: true, requiresOwner: true, title: "模型配置" }
         },
         {
           path: "official-models",
@@ -124,7 +125,7 @@ const router = createRouter({
           path: "agents",
           name: "agents",
           component: AgentsPage,
-          meta: { requiresAuth: true, title: "Agent 管理" }
+          meta: { requiresAuth: true, requiresOwner: true, title: "Agent 管理" }
         },
         {
           path: "chat/workspace",
@@ -163,7 +164,6 @@ const router = createRouter({
 
 router.beforeEach(async (to) => {
   const authStore = useAuthStore(pinia);
-  authStore.hydrate();
   await authStore.bootstrap();
 
   if (to.meta.guestOnly && authStore.isAuthenticated) {
@@ -177,14 +177,11 @@ router.beforeEach(async (to) => {
     };
   }
 
-  if (to.meta.requiresAuth && !authStore.currentUser) {
-    return {
-      name: "login",
-      query: { redirect: to.fullPath }
-    };
+  if (to.meta.requiresAdmin && (!authStore.currentUser || !authStore.isAdmin)) {
+    return { path: "/app/home" };
   }
 
-  if (to.meta.requiresAdmin && !authStore.isAdmin) {
+  if (to.meta.requiresOwner && (!authStore.currentUser || !authStore.isOwner)) {
     return { path: "/app/home" };
   }
 

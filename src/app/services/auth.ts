@@ -16,3 +16,7 @@ export async function fetchCurrentUser() {
   const response = await http.get<ApiResponse<CurrentUser>>("/api/auth/me");
   return response.data.data;
 }
+
+export async function logout() {
+  await http.post("/api/auth/logout");
+}

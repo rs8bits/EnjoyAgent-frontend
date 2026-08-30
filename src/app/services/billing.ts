@@ -7,15 +7,15 @@ import type {
   UserWalletTransaction
 } from "@/app/types/billing";
 
-export async function getCurrentWallet() {
-  const response = await http.get<ApiResponse<UserWallet>>("/api/wallet");
+export async function getCurrentWallet(signal?: AbortSignal) {
+  const response = await http.get<ApiResponse<UserWallet>>("/api/wallet", { signal });
   return response.data.data;
 }
 
-export async function listWalletTransactions(page = 0, size = 20) {
+export async function listWalletTransactions(page = 0, size = 20, signal?: AbortSignal) {
   const response = await http.get<ApiResponse<PagedResponse<UserWalletTransaction>>>(
     "/api/wallet/transactions",
-    { params: { page, size } }
+    { params: { page, size }, signal }
   );
   return extractPagedResponseData(response);
 }
@@ -25,15 +25,15 @@ export async function createRechargeOrder(payload: CreateRechargeOrderPayload) {
   return response.data.data;
 }
 
-export async function listRechargeOrders(page = 0, size = 20) {
+export async function listRechargeOrders(page = 0, size = 20, signal?: AbortSignal) {
   const response = await http.get<ApiResponse<PagedResponse<RechargeOrder>>>(
     "/api/recharge-orders",
-    { params: { page, size } }
+    { params: { page, size }, signal }
   );
   return extractPagedResponseData(response);
 }
 
-export async function getRechargeOrder(id: number) {
-  const response = await http.get<ApiResponse<RechargeOrder>>(`/api/recharge-orders/${id}`);
+export async function getRechargeOrder(id: number, signal?: AbortSignal) {
+  const response = await http.get<ApiResponse<RechargeOrder>>(`/api/recharge-orders/${id}`, { signal });
   return response.data.data;
 }
