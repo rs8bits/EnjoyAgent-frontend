@@ -34,7 +34,7 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
-import { Bot, Boxes, CreditCard, Database, KeyRound, LayoutDashboard, ShieldCheck, Sparkles, ToyBrick, Wallet, Waypoints, Workflow, Wrench } from "lucide-vue-next";
+import { Bot, Boxes, CreditCard, Database, Headphones, KeyRound, LayoutDashboard, ShieldCheck, Sparkles, ToyBrick, Wallet, Waypoints, Workflow, Wrench } from "lucide-vue-next";
 import { useRoute } from "vue-router";
 import { useAuthStore } from "@/app/stores/auth";
 
@@ -72,6 +72,7 @@ const sections = computed(() => {
     {
       title: "平台能力",
       items: [
+        { label: "AI 客服", to: "/app/support", icon: Headphones },
         { label: "聊天工作台", to: "/app/chat/workspace", icon: CreditCard },
         { label: "钱包中心", to: "/app/wallet", icon: Wallet },
         { label: "共享市场", to: "/app/market", icon: Boxes }

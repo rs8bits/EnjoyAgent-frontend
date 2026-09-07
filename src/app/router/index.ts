@@ -18,6 +18,7 @@ const MarketHubPage = () => import("@/app/pages/MarketHubPage.vue");
 const NotFoundPage = () => import("@/app/pages/NotFoundPage.vue");
 const OfficialModelsPage = () => import("@/app/pages/OfficialModelsPage.vue");
 const RegisterPage = () => import("@/app/pages/RegisterPage.vue");
+const SupportPage = () => import("@/app/pages/SupportPage.vue");
 const WalletCenterPage = () => import("@/app/pages/WalletCenterPage.vue");
 const WorkflowCanvasPage = () => import("@/app/pages/WorkflowCanvasPage.vue");
 const WorkflowsPage = () => import("@/app/pages/WorkflowsPage.vue");
@@ -126,6 +127,12 @@ const router = createRouter({
           name: "agents",
           component: AgentsPage,
           meta: { requiresAuth: true, requiresOwner: true, title: "Agent 管理" }
+        },
+        {
+          path: "support",
+          name: "support",
+          component: SupportPage,
+          meta: { requiresAuth: true, title: "AI 客服" }
         },
         {
           path: "chat/workspace",

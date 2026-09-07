@@ -108,6 +108,7 @@ const logoutError = ref("");
 const topItems = computed(() => {
   const items = [
     { label: "首页", to: "/app/home" },
+    { label: "AI 客服", to: "/app/support" },
     { label: "工作台", to: "/app/chat/workspace" }
   ];
 
@@ -127,6 +128,7 @@ const mobileItems = computed(() => {
     { label: "工作台首页", to: "/app/home" },
     { label: "凭证管理", to: "/app/credentials" },
     { label: "官方模型", to: "/app/official-models" },
+    { label: "AI 客服", to: "/app/support" },
     { label: "聊天工作台", to: "/app/chat/workspace" },
     { label: "钱包中心", to: "/app/wallet" },
     { label: "共享市场", to: "/app/market" }
