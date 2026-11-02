@@ -282,8 +282,8 @@
             <span class="font-semibold text-ink">{{ currentTurn?.modelName ?? streamStarted?.modelName ?? "未开始" }}</span>
           </div>
           <div class="flex items-center justify-between rounded-2xl border border-line bg-canvas px-4 py-3">
-            <span class="text-muted">流式模式</span>
-            <span class="font-semibold text-ink">{{ streamStarted?.mode === "SYNC_FALLBACK" ? "同步回退" : streamStarted?.mode === "STREAM" ? "流式输出" : "未开始" }}</span>
+            <span class="text-muted">执行模式</span>
+            <span class="font-semibold text-ink">{{ streamStarted?.mode === "EXECUTION" ? "任务执行" : streamStarted?.mode === "SYNC_FALLBACK" ? "同步回退" : streamStarted?.mode === "STREAM" ? "流式输出" : "未开始" }}</span>
           </div>
           <div class="flex items-center justify-between rounded-2xl border border-line bg-canvas px-4 py-3">
             <span class="text-muted">耗时</span>
