@@ -88,3 +88,10 @@ export interface ChatStreamStarted {
 export interface ChatStreamDelta {
   delta: string;
 }
+
+export interface ExecutionEvent {
+  runId: string; sequence: number; type: string; timestamp: string; data: Record<string, unknown>;
+}
+export interface McpConfirmation {
+  id: string; toolId: number; toolName: string; arguments: Record<string, unknown>; status: string; expiresAt: string;
+}

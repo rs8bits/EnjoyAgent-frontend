@@ -2,6 +2,7 @@ import { authenticatedFetch, extractFetchErrorMessage, extractPagedResponseData,
 import { consumeSseStream } from "@/app/services/sse";
 import type { ApiResponse, PagedResponse } from "@/app/types/api";
 import type {
+  ExecutionEvent,
   ChatMessage,
   ChatSession,
   ChatStreamDelta,
@@ -75,6 +76,7 @@ export async function sendChatMessage(
 }
 
 interface StreamHandlers {
+  onExecution?: (event: ExecutionEvent) => void;
   onStarted?: (event: ChatStreamStarted) => void;
   onRetrieval?: (event: KnowledgeRetrievalDebug) => void;
   onDelta?: (event: ChatStreamDelta) => void;
@@ -114,7 +116,9 @@ export async function streamChatMessage(
 
   let completed = false;
   await consumeSseStream(response.body, ({ event, data }) => {
-    if (event === "started") {
+    if (event === "execution") {
+      handlers.onExecution?.(JSON.parse(data) as ExecutionEvent);
+    } else if (event === "started") {
       handlers.onStarted?.(JSON.parse(data) as ChatStreamStarted);
     } else if (event === "retrieval") {
       handlers.onRetrieval?.(JSON.parse(data) as KnowledgeRetrievalDebug);

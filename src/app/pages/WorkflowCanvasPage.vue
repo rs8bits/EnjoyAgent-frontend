@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import McpConfirmationPanel from "@/app/components/McpConfirmationPanel.vue";
+import type { McpConfirmation } from "@/app/types/chat";
+
 import { computed, markRaw, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ArrowLeft, Database, FlaskConical, GitBranch, Loader2, Play, Repeat, Save, Sparkles, StopCircle, Trash2, Wrench } from "lucide-vue-next";
@@ -679,6 +682,12 @@ watch(selectedTestModelConfigId, (value) => {
   testModelConfigId.value = value ? Number(value) : null;
 });
 
+const workflowConfirmations = ref<McpConfirmation[]>([]);
+const checkpointDetails = ref('');
+async function loadNodeHistory(id: number) {
+  try { const response = await authenticatedFetch(`/api/workflows/executions/${id}/nodes`); if (!response.ok) throw new Error(await extractFetchErrorMessage(response, '加载节点失败')); checkpointDetails.value = JSON.stringify((await response.json() as ApiResponse<unknown>).data, null, 2); }
+  catch (e) { historyError.value = e instanceof Error ? e.message : '加载节点失败'; }
+}
 async function loadHistory() {
   historyController?.abort();
   const controller = new AbortController();
@@ -694,6 +703,12 @@ async function loadHistory() {
     const data = await res.json() as ApiResponse<PagedResponse<WorkflowExecutionHistory>>;
     if (!controller.signal.aborted) {
       execHistory.value = Array.isArray(data.data?.items) ? data.data.items : [];
+      const pending = await Promise.all(execHistory.value.filter(item => item.status === 'WAITING_APPROVAL').map(async item => {
+        const result = await authenticatedFetch(`/api/mcp/confirmations/workflow/${item.id}`, { signal: controller.signal });
+        if (!result.ok) throw new Error(await extractFetchErrorMessage(result, '加载待确认操作失败'));
+        return (await result.json() as ApiResponse<McpConfirmation[]>).data;
+      }));
+      if (!controller.signal.aborted) workflowConfirmations.value = pending.flat();
     }
   } catch (error) {
     if (!isRequestCanceled(error)) {
@@ -704,8 +719,9 @@ async function loadHistory() {
   }
 }
 
-async function runTest() {
-  if (!testInput.value.trim() || !testModelConfigId.value) return;
+async function runTest(resumeId?: number | MouseEvent) {
+  const executionId = typeof resumeId === 'number' ? resumeId : null;
+  if (!executionId && (!testInput.value.trim() || !testModelConfigId.value)) return;
   testRunning.value = true;
   testEvents.value = [];
   testFinalOutput.value = "";
@@ -716,10 +732,10 @@ async function runTest() {
   testRunController = controller;
   try {
     const draftCanvas = buildCanvasPayload();
-    const response = await authenticatedFetch(`/api/workflows/${workflowId}/test-run`, {
+    const response = await authenticatedFetch(executionId ? `/api/workflows/executions/${executionId}/resume` : `/api/workflows/${workflowId}/test-run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+      body: executionId ? undefined : JSON.stringify({
         userInput: testInput.value,
         modelConfigId: testModelConfigId.value,
         canvas: draftCanvas,
@@ -735,7 +751,9 @@ async function runTest() {
     let completed = false;
     await consumeSseStream(response.body, ({ event, data: rawData }) => {
       const data = JSON.parse(rawData) as Record<string, unknown>;
-      if (event === "completed") {
+      if (event === 'execution' && data.type === 'confirmation_required') {
+        workflowConfirmations.value = [data.data as McpConfirmation];
+      } else if (event === "completed") {
         completed = true;
         testFinalOutput.value = typeof data.finalOutput === "string" ? data.finalOutput : "";
       } else if (event === "error") {
@@ -1018,6 +1036,8 @@ watch(showTestPanel, (v) => { if (v) loadHistory(); });
             <div class="text-sm text-emerald-900 whitespace-pre-wrap">{{ testFinalOutput }}</div>
           </div>
 
+          <McpConfirmationPanel :proposals="workflowConfirmations" @resolved="loadHistory" />
+          <pre v-if="checkpointDetails" class="max-h-48 overflow-auto whitespace-pre-wrap text-xs">{{ checkpointDetails }}</pre>
           <!-- Execution history -->
           <div v-if="execHistory.length" class="mt-4">
             <div class="mb-2 text-xs font-semibold text-ink">执行历史</div>
@@ -1030,6 +1050,7 @@ watch(showTestPanel, (v) => { if (v) loadHistory(); });
                 <span class="text-muted">{{ h.durationMs }}ms</span>
                 <span class="text-muted ml-auto">{{ h.createdAt?.slice(0, 19).replace('T', ' ') }}</span>
               </div>
+              <div class="mt-2 flex gap-2"><button type="button" class="text-accent underline" @click="loadNodeHistory(h.id)">节点详情</button><button v-if="h.triggerType === 'TEST' && h.status !== 'COMPLETED'" type="button" class="text-accent underline disabled:opacity-50" :disabled="testRunning" @click="runTest(h.id)">从检查点恢复</button></div>
               <div v-if="h.errorMessage" class="mt-1 text-rose-500 truncate">{{ h.errorMessage }}</div>
             </div>
           </div>

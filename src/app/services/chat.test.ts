@@ -33,6 +33,16 @@ describe("streamChatMessage terminal states", () => {
     authenticatedFetchMock.mockReset();
   });
 
+  it("forwards execution progress and frozen action proposals before the suspended terminal event", async () => {
+    const onExecution = vi.fn();
+    authenticatedFetchMock.mockResolvedValue(sseResponse(
+      'event: execution\ndata: {"runId":"run-1","sequence":1,"type":"confirmation_required","data":{"id":"proposal-1"}}\n\n'
+      + 'event: error\ndata: {"code":"MCP_ACTION_CONFIRMATION_REQUIRED","message":"确认操作"}\n\n'
+    ));
+    await expect(streamChatMessage(7, { content: "删除记录" }, { onExecution })).rejects.toMatchObject({ code: "MCP_ACTION_CONFIRMATION_REQUIRED" });
+    expect(onExecution).toHaveBeenCalledWith(expect.objectContaining({ type: "confirmation_required", data: { id: "proposal-1" } }));
+  });
+
   it("resolves only after a completed event", async () => {
     const onCompleted = vi.fn();
     authenticatedFetchMock.mockResolvedValue(sseResponse(

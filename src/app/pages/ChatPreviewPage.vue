@@ -111,7 +111,7 @@
         </div>
       </div>
 
-      <div v-else class="grid min-h-0 gap-5 lg:h-full lg:grid-rows-[auto_minmax(0,1fr)_auto]">
+      <div v-else class="grid min-h-0 gap-5 lg:h-full lg:grid-rows-[auto_minmax(0,1fr)_auto_auto]">
         <div class="flex items-center justify-between gap-4 rounded-[20px] border border-line bg-canvas px-4 py-4">
           <div>
             <div class="text-base font-semibold text-ink">{{ activeSession?.title ?? "当前会话" }}</div>
@@ -154,7 +154,7 @@
               >
                 {{ isAssistantMessage(message.role) ? "助手" : "用户" }}
               </div>
-              <div class="whitespace-pre-wrap break-words">{{ message.content }}</div>
+              <div class="whitespace-pre-wrap break-words"><template v-for="(part, index) in citationParts(message.content)" :key="index"><button v-if="part.chunkId" type="button" class="mx-1 text-accent underline" @click="openEvidence(part.chunkId)">{{ part.text }}</button><span v-else>{{ part.text }}</span></template></div>
               <div
                 class="mt-3 text-xs"
                 :class="isAssistantMessage(message.role) ? 'text-muted' : 'text-white/80'"
@@ -173,43 +173,17 @@
           />
         </div>
 
+        <div v-if="evidence || evidenceError" class="max-h-64 overflow-auto rounded-xl border border-line bg-white p-4 text-sm">
+          <button type="button" class="float-right text-muted" @click="evidence = null; evidenceError = ''">关闭来源</button>
+          <p v-if="evidenceError" role="alert">{{ evidenceError }}</p>
+          <template v-if="evidence"><strong>{{ evidence.file_name }}</strong><p class="text-xs text-muted">{{ evidence.heading }} · 页码 {{ evidence.page_number ?? '未记录' }} · 字符 {{ evidence.source_start ?? '?' }}–{{ evidence.source_end ?? '?' }}</p><p v-for="paragraph in evidence.paragraphs" :key="paragraph.id" class="mt-3 whitespace-pre-wrap" :class="paragraph.id === evidence.id ? 'border-l-2 border-accent pl-2' : 'text-muted'">{{ paragraph.content }}</p></template>
+        </div>
         <form class="shrink-0 rounded-[26px] border border-line bg-canvas p-4" @submit.prevent="submitMessage">
           <div class="rounded-[22px] border border-white bg-white px-4 py-4 shadow-sm">
-            <div v-if="approvalBindingsLoading" class="mb-4 rounded-2xl border border-line bg-canvas px-4 py-3 text-xs text-muted">
-              正在检查当前 Agent 的高风险工具…
+            <McpConfirmationPanel :session-id="selectedSessionId" :proposals="confirmations" :refresh-key="confirmationRefresh" @resolved="continueConfirmedTurn" />
+            <div v-if="executionEvents.length" class="mb-3 max-h-32 overflow-auto rounded-xl bg-canvas p-3 text-xs" aria-live="polite">
+              <div v-for="event in executionEvents" :key="`${event.runId}:${event.sequence}`">{{ executionLabel(event) }}</div>
             </div>
-            <div v-else-if="highRiskBindings.length" class="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3">
-              <div class="text-sm font-semibold text-rose-700">高风险工具需逐次授权</div>
-              <p class="mt-1 text-xs leading-5 text-rose-600">
-                授权令牌仅保存在内存中、约 2 分钟有效，并会在发送下一条消息时立即从界面清除。
-              </p>
-              <div class="mt-3 flex flex-wrap gap-2">
-                <button
-                  v-for="binding in highRiskBindings"
-                  :key="binding.toolId"
-                  type="button"
-                  class="rounded-full border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-60"
-                  :class="remainingApprovalSeconds(binding.toolId) > 0
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                    : 'border-rose-200 bg-white text-rose-700 hover:border-rose-400'"
-                  :disabled="approvingToolId !== null || sending || remainingApprovalSeconds(binding.toolId) > 0"
-                  @click="approveHighRiskTool(binding)"
-                >
-                  {{ binding.toolName }}（{{ binding.serverName }}）·
-                  {{ approvingToolId === binding.toolId
-                    ? "授权中…"
-                    : remainingApprovalSeconds(binding.toolId) > 0
-                      ? `已授权 ${remainingApprovalSeconds(binding.toolId)} 秒`
-                      : "授权下条消息" }}
-                </button>
-              </div>
-              <p v-if="approvalError" class="mt-3 text-xs font-medium text-rose-700" role="alert">
-                {{ approvalError }}
-              </p>
-            </div>
-            <p v-else-if="approvalError" class="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-xs font-medium text-rose-700" role="alert">
-              {{ approvalError }}
-            </p>
             <textarea
               v-model="composer"
               rows="4"
@@ -223,7 +197,7 @@
                   {{ activeAgent?.name ?? "未选 Agent" }}
                 </span>
                 <span class="rounded-full bg-white px-3 py-1 text-xs font-medium text-muted">
-                  {{ streamStarted?.mode === "SYNC_FALLBACK" ? "同步回退" : "SSE 流式" }}
+                  {{ streamStarted?.mode === "EXECUTION" ? "任务执行" : "SSE 流式" }}
                 </span>
                 <span class="rounded-full bg-white px-3 py-1 text-xs font-medium text-muted">
                   {{ currentTurn?.modelName ?? streamStarted?.modelName ?? "等待模型返回" }}
@@ -340,7 +314,6 @@ import UiTextField from "@/app/components/ui/UiTextField.vue";
 import { usePaginatedAgentSelector } from "@/app/composables/usePaginatedAgentSelector";
 import {
   ChatStreamError,
-  MCP_HIGH_RISK_APPROVAL_REQUIRED,
   createChatIdempotencyKey,
   createChatSession,
   deleteChatSession,
@@ -348,9 +321,8 @@ import {
   listChatSessions,
   streamChatMessage
 } from "@/app/services/chat";
-import { extractApiErrorMessage, isRequestCanceled } from "@/app/services/http";
-import { approveHighRiskMcpTool, listAgentToolBindings, listMcpToolCallLogs } from "@/app/services/mcp";
-import { fetchAllPages } from "@/app/services/pagination";
+import { http, extractApiErrorMessage, isRequestCanceled } from "@/app/services/http";
+import { listMcpToolCallLogs } from "@/app/services/mcp";
 import { useAuthStore } from "@/app/stores/auth";
 import type {
   ChatMessage,
@@ -359,7 +331,35 @@ import type {
   ChatTurn,
   KnowledgeRetrievalDebug
 } from "@/app/types/chat";
-import type { AgentToolBinding, McpToolApproval, McpToolCallLog } from "@/app/types/mcp";
+import McpConfirmationPanel from "@/app/components/McpConfirmationPanel.vue";
+import type { ApiResponse } from "@/app/types/api";
+import type { ExecutionEvent, McpConfirmation } from "@/app/types/chat";
+import type { McpToolCallLog } from "@/app/types/mcp";
+
+
+const executionEvents = ref<ExecutionEvent[]>([]);
+const confirmations = ref<McpConfirmation[]>([]);
+const confirmationRefresh = ref(0);
+interface Evidence { id: number; file_name: string; heading: string | null; page_number: number | null; source_start: number | null; source_end: number | null; paragraphs: { id: number; content: string }[] }
+const evidence = ref<Evidence | null>(null);
+const evidenceError = ref('');
+function citationParts(text: string) {
+  return text.split(/(\[来源:\d+\])/g).map(part => ({ text: part, chunkId: /^\[来源:(\d+)\]$/.exec(part)?.[1] }));
+}
+async function openEvidence(id: string) {
+  const session = selectedSessionId.value;
+  evidenceError.value = ''; evidence.value = null;
+  try { const result = await http.get<ApiResponse<Evidence>>(`/api/knowledge/chunks/${id}`); if (selectedSessionId.value === session) evidence.value = result.data.data; }
+  catch (e) { if (selectedSessionId.value === session) evidenceError.value = extractApiErrorMessage(e, '加载来源失败'); }
+}
+function executionLabel(event: ExecutionEvent) {
+  const labels: Record<string, string> = { run_started: '开始执行', retrieval_started: '正在检索', retrieval_completed: '检索完成', model_started: '模型处理中', model_completed: '模型处理完成', tool_started: '开始调用工具', tool_completed: '工具执行完成', tool_failed: '工具执行失败', node_started: '节点开始', node_completed: '节点完成', node_failed: '节点失败', node_skipped: '跳过节点', confirmation_required: '等待操作确认', run_completed: '执行完成', heartbeat: '执行中' };
+  return `${labels[event.type] ?? event.type} ${String(event.data.toolName ?? event.data.nodeName ?? '')}`;
+}
+async function continueConfirmedTurn() {
+  if (pendingChatAttempt?.sessionId === selectedSessionId.value) { composer.value = pendingChatAttempt.content; await submitMessage(); }
+  else submitError.value = '操作已执行，请继续提问。';
+}
 
 const route = useRoute();
 const router = useRouter();
@@ -409,19 +409,11 @@ const streamStarted = ref<ChatStreamStarted | null>(null);
 const streamingAssistantId = ref<number | null>(null);
 const toolCallLogs = ref<McpToolCallLog[]>([]);
 const toolLogsLoading = ref(false);
-const highRiskBindings = ref<AgentToolBinding[]>([]);
-const approvalsByToolId = ref<Record<number, McpToolApproval>>({});
-const approvalBindingsLoading = ref(false);
-const approvingToolId = ref<number | null>(null);
-const approvalError = ref("");
-const approvalNow = ref(Date.now());
 let sessionLoadController: AbortController | null = null;
 let messageLoadController: AbortController | null = null;
 let toolLogController: AbortController | null = null;
 let streamController: AbortController | null = null;
-let approvalBindingsController: AbortController | null = null;
 let workspaceLoadController: AbortController | null = null;
-let approvalClock: ReturnType<typeof setInterval> | null = null;
 let deltaFrame: number | null = null;
 let pendingDelta = "";
 let initializingWorkspace = true;
@@ -434,9 +426,6 @@ interface PendingChatAttempt {
   content: string;
   payload: { content: string; toolApprovalTokens?: string[] };
   idempotencyKey: string;
-  approvedToolIds: number[];
-  requiresFreshHighRiskApproval: boolean;
-  recoveringHighRiskApproval: boolean;
 }
 let pendingChatAttempt: PendingChatAttempt | null = null;
 
@@ -455,8 +444,8 @@ const streamStateLabel = computed(() => {
   if (sending.value) {
     return "正在生成";
   }
-  if (streamStarted.value?.mode === "SYNC_FALLBACK") {
-    return "同步回退";
+  if (streamStarted.value?.mode === "EXECUTION") {
+    return "任务执行完成";
   }
   if (streamStarted.value?.mode === "STREAM") {
     return "流式完成";
@@ -506,134 +495,6 @@ function scoreText(score: number | null | undefined) {
     return "无分数";
   }
   return score.toFixed(2);
-}
-
-function remainingApprovalSeconds(toolId: number) {
-  const approval = approvalsByToolId.value[toolId];
-  if (!approval || String(approval.agentId) !== selectedAgentId.value) {
-    return 0;
-  }
-  return Math.max(0, Math.ceil((Date.parse(approval.expiresAt) - approvalNow.value) / 1000));
-}
-
-async function loadHighRiskBindings() {
-  approvalBindingsController?.abort();
-  approvalsByToolId.value = {};
-  highRiskBindings.value = [];
-  approvalError.value = "";
-  if (!selectedAgentId.value) {
-    highRiskBindings.value = [];
-    return;
-  }
-
-  const controller = new AbortController();
-  approvalBindingsController = controller;
-  const requestedAgentId = selectedAgentId.value;
-  approvalBindingsLoading.value = true;
-  try {
-    const bindings = await fetchAllPages((page, size) =>
-      listAgentToolBindings(Number(requestedAgentId), page, size, controller.signal)
-    );
-    if (controller.signal.aborted || requestedAgentId !== selectedAgentId.value) {
-      return;
-    }
-    highRiskBindings.value = bindings.filter((binding) => binding.enabled && binding.riskLevel === "HIGH");
-  } catch (error) {
-    if (!isRequestCanceled(error)) {
-      approvalError.value = extractApiErrorMessage(error, "加载高风险工具失败");
-    }
-  } finally {
-    if (approvalBindingsController === controller) {
-      approvalBindingsLoading.value = false;
-      approvalBindingsController = null;
-    }
-  }
-}
-
-async function approveHighRiskTool(binding: AgentToolBinding) {
-  if (!selectedAgentId.value || approvingToolId.value !== null) {
-    return;
-  }
-  if (!window.confirm(
-    `仅授权下一条消息调用高风险工具“${binding.toolName}”（${binding.serverName}）。是否继续？`
-  )) {
-    return;
-  }
-  const agentId = Number(selectedAgentId.value);
-  approvingToolId.value = binding.toolId;
-  approvalError.value = "";
-  try {
-    const approval = await approveHighRiskMcpTool(binding.toolId, agentId);
-    if (String(agentId) === selectedAgentId.value) {
-      const attempt = pendingChatAttempt;
-      if (attempt?.recoveringHighRiskApproval
-        && attempt.agentId === agentId
-        && attempt.sessionId === selectedSessionId.value) {
-        attempt.payload = {
-          content: attempt.content,
-          toolApprovalTokens: [
-            ...(attempt.payload.toolApprovalTokens ?? []),
-            approval.approvalToken
-          ]
-        };
-        attempt.approvedToolIds = [...new Set([...attempt.approvedToolIds, binding.toolId])];
-        attempt.requiresFreshHighRiskApproval = false;
-      } else {
-        pendingChatAttempt = null;
-      }
-      approvalsByToolId.value = {
-        ...approvalsByToolId.value,
-        [binding.toolId]: approval
-      };
-      approvalNow.value = Date.now();
-    }
-  } catch (error) {
-    approvalError.value = extractApiErrorMessage(error, "高风险工具授权失败");
-  } finally {
-    approvingToolId.value = null;
-  }
-}
-
-async function refreshHighRiskApprovalsForAttempt(
-  attempt: PendingChatAttempt,
-  signal: AbortSignal
-) {
-  const bindings = attempt.approvedToolIds
-    .map((toolId) => highRiskBindings.value.find((binding) => binding.toolId === toolId))
-    .filter((binding): binding is AgentToolBinding => Boolean(binding));
-
-  if (!bindings.length) {
-    approvalError.value = "服务请求调用尚未授权的高风险工具。请先在上方明确选择并授权具体工具，再次发送将沿用当前请求标识。";
-    return false;
-  }
-
-  const toolNames = bindings.map((binding) => `“${binding.toolName}”`).join("、");
-  if (!window.confirm(
-    `上一次用于 ${toolNames} 的一次性授权已消费或失效。是否重新授权这些工具，并继续同一条消息？`
-  )) {
-    approvalError.value = "已暂停高风险工具调用；未重新授权，也未自动重放请求。";
-    return false;
-  }
-
-  approvalError.value = "";
-  try {
-    const approvals: McpToolApproval[] = [];
-    for (const binding of bindings) {
-      approvals.push(await approveHighRiskMcpTool(binding.toolId, attempt.agentId, signal));
-    }
-    if (signal.aborted || pendingChatAttempt !== attempt) return false;
-    attempt.payload = {
-      content: attempt.content,
-      toolApprovalTokens: approvals.map((approval) => approval.approvalToken)
-    };
-    attempt.requiresFreshHighRiskApproval = false;
-    return true;
-  } catch (error) {
-    if (!isRequestCanceled(error)) {
-      approvalError.value = extractApiErrorMessage(error, "重新授权高风险工具失败");
-    }
-    return false;
-  }
 }
 
 async function loadAgentsAndSessions(signal?: AbortSignal) {
@@ -877,23 +738,15 @@ async function submitMessage() {
     && pendingChatAttempt.agentId === agentId
     && pendingChatAttempt.content === submittedContent;
   if (!canRetryPreviousAttempt) {
-    const activeApprovals = Object.values(approvalsByToolId.value).filter((approval) =>
-      approval.agentId === Number(selectedAgentId.value) && Date.parse(approval.expiresAt) > Date.now()
-    );
     pendingChatAttempt = {
       sessionId,
       agentId,
       content: submittedContent,
       payload: {
         content: submittedContent,
-        ...(activeApprovals.length
-          ? { toolApprovalTokens: activeApprovals.map((approval) => approval.approvalToken) }
-          : {})
+
       },
       idempotencyKey: createChatIdempotencyKey(),
-      approvedToolIds: activeApprovals.map((approval) => approval.toolId),
-      requiresFreshHighRiskApproval: false,
-      recoveringHighRiskApproval: false
     };
   }
   const attempt = pendingChatAttempt;
@@ -912,23 +765,21 @@ async function submitMessage() {
   retrievalDebug.value = null;
   streamStarted.value = null;
   streamingAssistantId.value = null;
+  executionEvents.value = [];
+  sessionStorage.setItem('enjoy.pendingChat', JSON.stringify(attempt));
 
   try {
-    if (attempt.requiresFreshHighRiskApproval) {
-      const refreshed = await refreshHighRiskApprovalsForAttempt(attempt, controller.signal);
-      if (!refreshed) {
-        submitError.value = approvalError.value || "高风险工具调用已暂停，等待重新授权。";
-        return;
-      }
-    }
-    approvalsByToolId.value = {};
-
     while (!controller.signal.aborted) {
       try {
         await streamChatMessage(
           sessionId,
           attempt.payload,
           {
+            onExecution(event) {
+              if (selectedSessionId.value !== sessionId) return;
+              executionEvents.value = [...executionEvents.value, event].slice(-100);
+              if (event.type === 'confirmation_required') confirmations.value = [event.data as unknown as McpConfirmation];
+            },
             onStarted(event) {
               if (event.sessionId !== sessionId || selectedSessionId.value !== sessionId) return;
               streamStarted.value = event;
@@ -978,7 +829,7 @@ async function submitMessage() {
               streamingAssistantId.value = null;
             },
             onError(error) {
-              if (selectedSessionId.value === sessionId && error.code !== MCP_HIGH_RISK_APPROVAL_REQUIRED) {
+              if (selectedSessionId.value === sessionId && error.code !== 'MCP_ACTION_CONFIRMATION_REQUIRED' ) {
                 submitError.value = error.message;
               }
             }
@@ -991,33 +842,11 @@ async function submitMessage() {
         break;
       } catch (error) {
         clearFailedStreamingAssistant(sessionId);
-        const needsFreshHighRiskApproval = error instanceof ChatStreamError
-          && error.code === MCP_HIGH_RISK_APPROVAL_REQUIRED;
-        if (needsFreshHighRiskApproval
-          && pendingChatAttempt === attempt
-          && selectedSessionId.value === sessionId
-          && selectedAgentId.value === String(agentId)
-          && !controller.signal.aborted) {
-          attempt.payload = { content: attempt.content };
-          attempt.requiresFreshHighRiskApproval = true;
-          attempt.recoveringHighRiskApproval = true;
-          const refreshed = await refreshHighRiskApprovalsForAttempt(attempt, controller.signal);
-          if (refreshed && !controller.signal.aborted) {
-            submitError.value = "";
-            streamStarted.value = null;
-            retrievalDebug.value = null;
-            continue;
-          }
-          if (controller.signal.aborted
-            || pendingChatAttempt !== attempt
-            || selectedSessionId.value !== sessionId
-            || selectedAgentId.value !== String(agentId)) {
-            return;
-          }
-          submitError.value = approvalError.value || "高风险工具调用已暂停，等待重新授权。";
+        if (error instanceof ChatStreamError && error.code === 'MCP_ACTION_CONFIRMATION_REQUIRED') {
+          submitError.value = '请核对确认卡片中的参数，确认执行后将继续当前请求。';
+          confirmationRefresh.value++;
           return;
         }
-
         if (!isRequestCanceled(error) && selectedSessionId.value === sessionId) {
           submitError.value = error instanceof Error ? error.message : extractApiErrorMessage(error, "发送消息失败");
         }
@@ -1032,6 +861,7 @@ async function submitMessage() {
     }
     if (pendingChatAttempt === attempt) {
       pendingChatAttempt = null;
+      sessionStorage.removeItem('enjoy.pendingChat');
     }
     sessionPage.value = 0;
     await loadSessions();
@@ -1085,7 +915,6 @@ watch(selectedAgentId, async (value) => {
     toolCallLogs.value = [];
     sessionPage.value = 0;
     messagePage.value = 0;
-    await loadHighRiskBindings();
     if (!componentActive) return;
     await loadSessions();
     if (!componentActive) return;
@@ -1100,6 +929,8 @@ watch(selectedAgentId, async (value) => {
 });
 
 watch(selectedSessionId, async (value) => {
+  confirmations.value = []; executionEvents.value = []; evidence.value = null;
+
   if (initializingWorkspace || switchingAgent) return;
   streamController?.abort();
   if (pendingChatAttempt?.sessionId !== value) {
@@ -1133,11 +964,13 @@ onMounted(async () => {
   await loadAgentsAndSessions(controller.signal);
   if (controller.signal.aborted) return;
   initializingWorkspace = false;
-  await loadHighRiskBindings();
+  try {
+    const saved = JSON.parse(sessionStorage.getItem('enjoy.pendingChat') ?? 'null') as PendingChatAttempt | null;
+    if (saved && saved.sessionId === selectedSessionId.value && saved.agentId === Number(selectedAgentId.value)) {
+      pendingChatAttempt = saved; composer.value = saved.content;
+    }
+  } catch { sessionStorage.removeItem('enjoy.pendingChat'); }
   if (controller.signal.aborted) return;
-  approvalClock = globalThis.setInterval(() => {
-    approvalNow.value = Date.now();
-  }, 1_000);
   if (selectedSessionId.value) {
     await loadMessages();
     if (controller.signal.aborted || !componentActive) return;
@@ -1157,11 +990,7 @@ onBeforeUnmount(() => {
   messageLoadController?.abort();
   toolLogController?.abort();
   streamController?.abort();
-  approvalBindingsController?.abort();
   pendingChatAttempt = null;
-  if (approvalClock !== null) {
-    globalThis.clearInterval(approvalClock);
-  }
   if (deltaFrame !== null) {
     window.cancelAnimationFrame(deltaFrame);
   }
