@@ -168,6 +168,7 @@
           />
 
           <div class="grid gap-3 md:grid-cols-2">
+            <UiCheckbox v-model="form.sandboxEnabled" label="启用文件处理与代码执行" hint="允许处理会话附件，生成可下载的文档、表格和图片。" />
             <UiCheckbox
               v-model="form.memoryEnabled"
               label="启用会话记忆"
@@ -185,10 +186,10 @@
           </div>
 
           <div class="flex flex-wrap items-center gap-3 pt-2">
-            <UiButton type="submit" :disabled="saving">
+            <UiButton type="submit" :disabled="saving || sandboxCapabilityLoading">
               {{ saving ? "保存中..." : selectedId ? "保存修改" : "创建 Agent" }}
             </UiButton>
-            <UiButton variant="secondary" :disabled="saving" @click="startCreate">
+            <UiButton variant="secondary" :disabled="saving || sandboxCapabilityLoading" @click="startCreate">
               新建空白表单
             </UiButton>
             <UiButton
@@ -222,6 +223,7 @@ import { extractApiErrorMessage, isRequestCanceled } from "@/app/services/http";
 import { listKnowledgeBases } from "@/app/services/knowledge";
 import { listModelConfigs, listOfficialModelConfigs } from "@/app/services/models";
 import { fetchAllPages } from "@/app/services/pagination";
+import { getAgentSandbox, setAgentSandbox } from "@/app/services/agents";
 import { listWorkflows } from "@/app/services/workflow";
 import type { Agent, AgentChatModelBindingType } from "@/app/types/agent";
 import type { KnowledgeBase } from "@/app/types/knowledge";
@@ -229,6 +231,7 @@ import type { ModelConfig, OfficialModelConfig } from "@/app/types/model";
 import type { Workflow } from "@/app/types/workflow";
 
 const route = useRoute();
+const sandboxCapabilityLoading = ref(false);
 
 const agents = ref<Agent[]>([]);
 const page = ref(0);
@@ -263,7 +266,8 @@ const form = reactive({
   contextWindowSize: "12",
   memoryEnabled: true,
   memoryUpdateMessageThreshold: "6",
-  enabled: true
+  enabled: true,
+  sandboxEnabled: false
 });
 
 const errors = reactive({
@@ -328,6 +332,7 @@ function resetForm() {
   form.memoryEnabled = true;
   form.memoryUpdateMessageThreshold = "6";
   form.enabled = true;
+  form.sandboxEnabled = false; sandboxCapabilityLoading.value = false;
   errors.name = "";
   errors.systemPrompt = "";
   errors.modelBinding = "";
@@ -369,6 +374,11 @@ function selectAgent(agent: Agent) {
   form.memoryEnabled = agent.memoryEnabled;
   form.memoryUpdateMessageThreshold = agent.memoryUpdateMessageThreshold ? String(agent.memoryUpdateMessageThreshold) : "6";
   form.enabled = agent.enabled;
+  form.sandboxEnabled = false;
+  sandboxCapabilityLoading.value = true;
+  void getAgentSandbox(agent.id).then(capability => { if (selectedId.value === agent.id) form.sandboxEnabled = capability.enabled; })
+    .catch(error => { if (selectedId.value === agent.id) submitError.value = extractApiErrorMessage(error, "文件工具设置加载失败"); })
+    .finally(() => { if (selectedId.value === agent.id) sandboxCapabilityLoading.value = false; });
   errors.name = "";
   errors.systemPrompt = "";
   errors.modelBinding = "";
@@ -496,10 +506,13 @@ async function submit() {
         ...payload,
         workflowId: form.workflowId ? Number(form.workflowId) : null
       });
+      await setAgentSandbox(updated.id, form.sandboxEnabled);
       await loadAll();
       selectAgent(updated);
     } else {
       const created = await createAgent(payload);
+      selectedId.value = created.id;
+      await setAgentSandbox(created.id, form.sandboxEnabled);
       await loadAll();
       selectAgent(created);
     }

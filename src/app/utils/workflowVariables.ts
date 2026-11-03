@@ -57,6 +57,12 @@ const OUTPUT_FIELDS: Record<string, WorkflowNodeOutputField[]> = {
     { field: "tool_result", label: "工具结果", description: "适合继续交给模型的工具结果" },
     { field: "tool_raw_response", label: "工具原始响应", description: "MCP 工具返回的原始响应" },
   ],
+  sandbox: [
+    { field: "sandbox_result", label: "沙箱结果", description: "状态与成果清单" },
+    { field: "artifact_ids", label: "产物文件 ID", description: "供后续沙箱节点读取的文件 ID 数组" },
+    { field: "artifacts", label: "产物清单", description: "文件名称、类型和大小" },
+    { field: "task_id", label: "任务 ID", description: "可查询任务与下载成果" },
+  ],
   condition: [
     { field: "condition_result", label: "判断结果", description: "条件节点的布尔结果" },
   ],
@@ -145,6 +151,11 @@ export function buildWorkflowVariableGroups(
   const groups: WorkflowVariableGroup[] = [{
     label: "工作流输入",
     options: [
+      {
+        label: "聊天附件文件 ID",
+        value: "{{input_file_ids}}",
+        description: "聊天执行时可供文件处理节点读取的附件 ID 数组",
+      },
       {
         label: "原始用户输入",
         value: "{{user_input}}",

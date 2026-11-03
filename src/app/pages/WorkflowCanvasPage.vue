@@ -15,6 +15,7 @@ import StartNode from "@/app/components/workflow/nodes/StartNode.vue";
 import LlmNode from "@/app/components/workflow/nodes/LlmNode.vue";
 import KnowledgeNode from "@/app/components/workflow/nodes/KnowledgeNode.vue";
 import ToolNode from "@/app/components/workflow/nodes/ToolNode.vue";
+import SandboxNode from "@/app/components/workflow/nodes/SandboxNode.vue";
 import ConditionNode from "@/app/components/workflow/nodes/ConditionNode.vue";
 import LoopNode from "@/app/components/workflow/nodes/LoopNode.vue";
 import EndNode from "@/app/components/workflow/nodes/EndNode.vue";
@@ -66,6 +67,7 @@ const nodeTypes = {
   llm: markRaw(LlmNode),
   knowledge: markRaw(KnowledgeNode),
   tool: markRaw(ToolNode),
+  sandbox: markRaw(SandboxNode),
   condition: markRaw(ConditionNode),
   loop: markRaw(LoopNode),
   end: markRaw(EndNode),
@@ -553,6 +555,7 @@ function goBack() {
 }
 
 const paletteNodes = [
+  { type: "sandbox", label: "文件处理 / 沙箱", icon: Wrench, color: "text-cyan-600", bg: "bg-cyan-50", border: "border-cyan-200" },
   { type: "start", label: "开始", icon: Play, color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-200" },
   { type: "llm", label: "LLM", icon: Sparkles, color: "text-blue-600", bg: "bg-blue-50", border: "border-blue-200" },
   { type: "knowledge", label: "知识检索", icon: Database, color: "text-purple-600", bg: "bg-purple-50", border: "border-purple-200" },

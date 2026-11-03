@@ -125,7 +125,7 @@ export function extractApiErrorMessage(error: unknown, fallback = "Request faile
     return "上传文件过大，请控制在服务端允许的大小范围内后重试。";
   }
   if (axiosError.response?.status === 415) {
-    return "文件类型暂不支持，当前版本只支持 TXT、Markdown、PDF。";
+    return axiosError.response?.data?.data?.message || "文件类型暂不支持。";
   }
   if (axiosError.code === "ECONNABORTED") {
     return "请求超时，文档处理可能仍在进行中，请稍后刷新查看。";

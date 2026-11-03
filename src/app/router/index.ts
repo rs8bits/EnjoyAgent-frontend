@@ -9,6 +9,7 @@ const AdminOfficialModelsPage = () => import("@/app/pages/AdminOfficialModelsPag
 const AdminReviewCenterPage = () => import("@/app/pages/AdminReviewCenterPage.vue");
 const AgentsPage = () => import("@/app/pages/AgentsPage.vue");
 const ChatPreviewPage = () => import("@/app/pages/ChatPreviewPage.vue");
+const FileWorkspacePage = () => import("@/app/pages/FileWorkspacePage.vue");
 const CredentialsPage = () => import("@/app/pages/CredentialsPage.vue");
 const KnowledgeImportPage = () => import("@/app/pages/KnowledgeImportPage.vue");
 const LoginPage = () => import("@/app/pages/LoginPage.vue");
@@ -54,6 +55,12 @@ const router = createRouter({
       component: AppWorkspaceLayout,
       meta: { requiresAuth: true },
       children: [
+        {
+          path: "files",
+          name: "file-workspace",
+          component: FileWorkspacePage,
+          meta: { requiresAuth: true, title: "文件与成果" }
+        },
         {
           path: "",
           redirect: "/app/home"

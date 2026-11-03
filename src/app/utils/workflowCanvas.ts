@@ -19,6 +19,7 @@ export interface CanvasHydrationSnapshot<TNode, TEdge> {
 export const DEFAULT_LLM_SYSTEM_PROMPT = "请根据以下直接上游节点输出完成任务：\n{{node_input}}";
 
 export function createNewNodeConfigJson(nodeType: string) {
+  if (nodeType.toLowerCase() === "sandbox") return JSON.stringify({operation:"PYTHON",code:"from pathlib import Path\nPath('/output/result.txt').write_text('done')",fileIds:[],arguments:{},timeoutSeconds:120});
   if (nodeType.toLowerCase() === "llm") {
     return JSON.stringify({ systemPrompt: DEFAULT_LLM_SYSTEM_PROMPT });
   }

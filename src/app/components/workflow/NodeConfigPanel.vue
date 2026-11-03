@@ -6,6 +6,7 @@ import type { KnowledgeBase } from "@/app/types/knowledge";
 import type { McpServer, McpTool } from "@/app/types/mcp";
 import { buildMcpToolOptions, getMcpCatalogState, parseMcpToolInputSchema } from "@/app/utils/mcpTools";
 import WorkflowVariablePicker from "@/app/components/workflow/WorkflowVariablePicker.vue";
+import SandboxNodeConfig from "@/app/components/workflow/SandboxNodeConfig.vue";
 import {
   buildWorkflowVariableGroups,
   getDirectUpstreamNodes,
@@ -65,7 +66,7 @@ const toolArgumentsError = ref("");
 const nodeTypeLabel = computed(() => {
   const labels: Record<string, string> = {
     start: "开始节点", llm: "LLM 节点", knowledge: "知识检索节点",
-    tool: "工具调用节点", condition: "条件判断节点", loop: "循环节点", end: "结束节点",
+    tool: "工具调用节点", sandbox: "文件处理 / 沙箱节点", condition: "条件判断节点", loop: "循环节点", end: "结束节点",
   };
   return labels[nodeType.value || ""] || nodeType.value;
 });
@@ -473,6 +474,7 @@ async function insertConfigVariable(
       </template>
 
       <!-- End node -->
+      <SandboxNodeConfig v-if="nodeType === 'sandbox'" :key="nodeId" :config="configJson" @change="emit('updateConfig', nodeId, JSON.stringify($event))" />
       <div v-if="nodeType === 'end'">
         <label :for="fieldId('output-template')" class="mb-1 block text-xs font-medium text-ink">最终输出模板</label>
         <textarea

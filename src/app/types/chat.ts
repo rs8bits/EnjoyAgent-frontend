@@ -16,6 +16,7 @@ export interface ChatMessage {
   role: "USER" | "ASSISTANT" | string;
   content: string;
   createdAt: string;
+  files?: import("@/app/types/files").FileAsset[];
 }
 
 export interface RetrievedKnowledgeChunk {
@@ -72,6 +73,7 @@ export interface CreateChatSessionPayload {
 export interface SendChatMessagePayload {
   content: string;
   toolApprovalTokens?: string[];
+  fileIds?: string[];
 }
 
 export interface ChatStreamStarted {

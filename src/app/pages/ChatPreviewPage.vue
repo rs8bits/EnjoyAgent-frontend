@@ -155,6 +155,7 @@
                 {{ isAssistantMessage(message.role) ? "助手" : "用户" }}
               </div>
               <div class="whitespace-pre-wrap break-words"><template v-for="(part, index) in citationParts(message.content)" :key="index"><button v-if="part.chunkId" type="button" class="mx-1 text-accent underline" @click="openEvidence(part.chunkId)">{{ part.text }}</button><span v-else>{{ part.text }}</span></template></div>
+              <div v-if="message.files?.length" class="mt-3 grid gap-2"><ArtifactCard v-for="file in message.files" :key="file.id" :file="file" @preview="attachmentPreview = $event" @download="downloadAttachment" /></div>
               <div
                 class="mt-3 text-xs"
                 :class="isAssistantMessage(message.role) ? 'text-muted' : 'text-white/80'"
@@ -183,6 +184,11 @@
             <McpConfirmationPanel :session-id="selectedSessionId" :proposals="confirmations" :refresh-key="confirmationRefresh" @resolved="continueConfirmedTurn" />
             <div v-if="executionEvents.length" class="mb-3 max-h-32 overflow-auto rounded-xl bg-canvas p-3 text-xs" aria-live="polite">
               <div v-for="event in executionEvents" :key="`${event.runId}:${event.sequence}`">{{ executionLabel(event) }}</div>
+            </div>
+            <div class="mb-3 flex flex-wrap items-center gap-2 text-xs">
+              <label class="cursor-pointer rounded-full border border-line px-3 py-2">{{ uploadingAttachment ? '上传中…' : '添加附件' }}<input type="file" class="sr-only" :disabled="sending || uploadingAttachment || !fileToolsEnabled || composerFiles.length >= 10" @change="uploadAttachment" /></label>
+              <span v-if="!fileToolsEnabled" class="text-muted">此 Agent 尚未开启文件处理工具</span>
+              <span v-for="file in composerFiles" :key="file.id" class="rounded-full bg-accent-soft px-3 py-2">{{ file.name }} <button type="button" :disabled="sending" :aria-label="`移除附件 ${file.name}`" @click="composerFiles = composerFiles.filter(item => item.id !== file.id)">×</button></span>
             </div>
             <textarea
               v-model="composer"
@@ -301,12 +307,18 @@
       </SectionCard>
     </div>
   </div>
+  <FilePreviewDialog v-if="attachmentPreview" :key="attachmentPreview.id" :file="attachmentPreview" @close="attachmentPreview = null" />
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import SectionCard from "@/app/components/SectionCard.vue";
+import ArtifactCard from "@/app/components/files/ArtifactCard.vue";
+import FilePreviewDialog from "@/app/components/files/FilePreviewDialog.vue";
+import { uploadFile, downloadFileAsset, getFileAsset } from "@/app/services/files";
+import { getAgentSandbox } from "@/app/services/agents";
+import type { FileAsset } from "@/app/types/files";
 import UiButton from "@/app/components/ui/UiButton.vue";
 import UiPagination from "@/app/components/ui/UiPagination.vue";
 import UiSelect from "@/app/components/ui/UiSelect.vue";
@@ -361,6 +373,17 @@ async function continueConfirmedTurn() {
   else submitError.value = '操作已执行，请继续提问。';
 }
 
+const composerFiles = ref<FileAsset[]>([]), attachmentPreview = ref<FileAsset | null>(null);
+const uploadingAttachment = ref(false), fileToolsEnabled = ref(false);
+async function uploadAttachment(event: Event) {
+  const input = event.target as HTMLInputElement, file = input.files?.[0];
+  if (!file) return;
+  uploadingAttachment.value = true;
+  try { const saved = await uploadFile(file); composerFiles.value.push(saved); }
+  catch (error) { submitError.value = extractApiErrorMessage(error, "附件上传失败"); }
+  finally { uploadingAttachment.value = false; input.value = ""; }
+}
+async function downloadAttachment(file: FileAsset) { try { await downloadFileAsset(file); } catch (error) { submitError.value = extractApiErrorMessage(error); } }
 const route = useRoute();
 const router = useRouter();
 const authStore = useAuthStore();
@@ -736,7 +759,8 @@ async function submitMessage() {
   const submittedContent = composer.value.trim();
   const canRetryPreviousAttempt = pendingChatAttempt?.sessionId === sessionId
     && pendingChatAttempt.agentId === agentId
-    && pendingChatAttempt.content === submittedContent;
+    && pendingChatAttempt.content === submittedContent
+    && JSON.stringify(pendingChatAttempt.payload.fileIds ?? []) === JSON.stringify(composerFiles.value.map(file => file.id));
   if (!canRetryPreviousAttempt) {
     pendingChatAttempt = {
       sessionId,
@@ -744,7 +768,7 @@ async function submitMessage() {
       content: submittedContent,
       payload: {
         content: submittedContent,
-
+        ...(composerFiles.value.length ? { fileIds: composerFiles.value.map(file => file.id) } : {}),
       },
       idempotencyKey: createChatIdempotencyKey(),
     };
@@ -857,7 +881,7 @@ async function submitMessage() {
     if (controller.signal.aborted) return;
 
     if (selectedSessionId.value === sessionId) {
-      composer.value = "";
+      composer.value = ""; composerFiles.value = [];
     }
     if (pendingChatAttempt === attempt) {
       pendingChatAttempt = null;
@@ -929,6 +953,7 @@ watch(selectedAgentId, async (value) => {
 });
 
 watch(selectedSessionId, async (value) => {
+  composerFiles.value = [];
   confirmations.value = []; executionEvents.value = []; evidence.value = null;
 
   if (initializingWorkspace || switchingAgent) return;
@@ -957,6 +982,13 @@ watch(selectedSessionId, async (value) => {
   await loadToolCallLogs();
 });
 
+watch(selectedAgentId, async (id) => {
+  fileToolsEnabled.value = false;
+  if (!id) return;
+  try { const capability = await getAgentSandbox(Number(id)); if (id === selectedAgentId.value) fileToolsEnabled.value = capability.enabled; }
+  catch { /* Sending text remains available when capability discovery fails. */ }
+}, { immediate: true });
+
 onMounted(async () => {
   componentActive = true;
   const controller = new AbortController();
@@ -968,6 +1000,7 @@ onMounted(async () => {
     const saved = JSON.parse(sessionStorage.getItem('enjoy.pendingChat') ?? 'null') as PendingChatAttempt | null;
     if (saved && saved.sessionId === selectedSessionId.value && saved.agentId === Number(selectedAgentId.value)) {
       pendingChatAttempt = saved; composer.value = saved.content;
+      composerFiles.value = await Promise.all((saved.payload.fileIds ?? []).map(getFileAsset));
     }
   } catch { sessionStorage.removeItem('enjoy.pendingChat'); }
   if (controller.signal.aborted) return;

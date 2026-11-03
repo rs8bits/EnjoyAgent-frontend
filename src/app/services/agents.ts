@@ -28,3 +28,9 @@ export async function updateAgent(id: number, payload: UpdateAgentPayload) {
 export async function deleteAgent(id: number) {
   await http.delete<ApiResponse<null>>(`/api/agents/${id}`);
 }
+export async function getAgentSandbox(id: number) {
+  return (await http.get<ApiResponse<{ enabled: boolean }>>(`/api/agents/${id}/sandbox`)).data.data;
+}
+export async function setAgentSandbox(id: number, enabled: boolean) {
+  return (await http.put<ApiResponse<{ enabled: boolean }>>(`/api/agents/${id}/sandbox`, { enabled })).data.data;
+}

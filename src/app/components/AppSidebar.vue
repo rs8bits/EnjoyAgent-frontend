@@ -74,6 +74,7 @@ const sections = computed(() => {
       items: [
         { label: "AI 客服", to: "/app/support", icon: Headphones },
         { label: "聊天工作台", to: "/app/chat/workspace", icon: CreditCard },
+        { label: "文件与成果", to: "/app/files", icon: Database },
         { label: "钱包中心", to: "/app/wallet", icon: Wallet },
         { label: "共享市场", to: "/app/market", icon: Boxes }
       ]
