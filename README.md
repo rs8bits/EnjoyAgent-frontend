@@ -12,6 +12,8 @@ EnjoyAgent 的 Web 客户端，包含用户工作台和管理后台。后端仓�
 - 用户注册、登录与 HttpOnly Cookie 会话
 - Agent、凭证、用户模型和官方模型管理
 - SSE 流式聊天、会话历史、知识检索结果和 MCP 工具调用轨迹
+- 文件工作台、PDF / Office 处理、Excel / CSV 分析、Python / SQL 执行
+- 聊天附件、成果预览与下载、任务日志及资源消耗展示
 - 知识库、文档上传和索引状态管理
 - MCP Server、OAuth、工具目录和 Agent 工具绑定
 - 可视化工作流编辑、测试运行和执行历史
@@ -31,6 +33,36 @@ EnjoyAgent 的 Web 客户端，包含用户工作台和管理后台。后端仓�
 ### 钱包中心
 
 ![钱包中心](docs/images/wallet-center.png)
+
+## 文件处理与成果交付预览
+
+以下截图于 2026-11-03 在本地 Chrome 浏览器中采集，使用虚构销售数据。文件处理实际运行于 Docker 沙箱，产物存储于 MinIO；模型相关验收使用本地确定性模拟服务。
+
+### 文件工作台
+
+选择输入文件和处理类型，提交 Excel / CSV 汇总任务。
+
+![文件工作台](docs/images/file-delivery-workspace.jpg)
+
+### 任务日志与成果清单
+
+查看退出码、耗时、CPU、采样峰值内存、stdout / stderr，以及带生成步骤的成果。
+
+![任务日志与成果清单](docs/images/sandbox-task-details.jpg)
+
+### Excel 成果预览
+
+直接预览汇总表，并下载 Excel 原文件。
+
+![Excel 成果预览](docs/images/artifact-table-preview.jpg)
+
+### 沙箱工作流执行
+
+串联 Python 文件处理与 SQL 分组汇总，查看最终输出和执行历史。
+
+![沙箱工作流执行](docs/images/sandbox-workflow-run.jpg)
+
+浏览器操作、结果校验和验收范围见 [本地浏览器验收记录](docs/testing/browser-sandbox-acceptance.md)。
 
 ## 技术栈
 
